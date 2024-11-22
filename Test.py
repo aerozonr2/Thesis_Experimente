@@ -1,3 +1,5 @@
+print("Hello World!1")
+
 import os
 import time
 import torch
@@ -12,4 +14,4 @@ import functools
 
 from torch.utils.data import DataLoader
 
-print("Hello World!")
+print("Hello World!2")
