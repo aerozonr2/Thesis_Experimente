@@ -1,0 +1,49 @@
+{
+  "os":  "Windows-10-10.0.22631-SP0",
+  "python":  "3.10.11",
+  "startedAt":  "2024-12-05T09:27:05.596930Z",
+  "args":  [
+    "--finetune_epochs",
+    "3",
+    "--wandb_project",
+    "Local_LayUp_Test"
+  ],
+  "program":  "C:\\Users\\belas\\Documents\\VS Code Skripte\\Thesis_Experimente\\LayUp\\main.py",
+  "codePath":  "LayUp\\main.py",
+  "git":  {
+    "remote":  "https://github.com/aerozonr2/Thesis_Experimente.git",
+    "commit":  "a06595fe2adec1852972cfe0ea56e0bc797e9aee"
+  },
+  "email":  "belaschindler@gmx.de",
+  "root":  "C:\\Users\\belas\\Documents\\VS Code Skripte\\Thesis_Experimente\\LayUp",
+  "host":  "Belas_Laptop",
+  "username":  "belas",
+  "executable":  "C:\\Users\\belas\\Documents\\VS Code Skripte\\Thesis_Experimente\\.venv\\Scripts\\python.exe",
+  "codePathLocal":  "main.py",
+  "cpu_count":  8,
+  "cpu_count_logical":  16,
+  "gpu":  "NVIDIA GeForce RTX 3050 Laptop GPU",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "487147769856",
+      "used":  "415468441600"
+    }
+  },
+  "memory":  {
+    "total":  "16558182400"
+  },
+  "cpu":  {
+    "count":  8,
+    "countLogical":  16
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA GeForce RTX 3050 Laptop GPU",
+      "memoryTotal":  "4294967296",
+      "cudaCores":  2048,
+      "architecture":  "Ampere"
+    }
+  ],
+  "cudaVersion":  "12.7"
+}

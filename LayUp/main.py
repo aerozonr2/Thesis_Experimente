@@ -335,6 +335,10 @@ if __name__ == "__main__":
         help="Root directory for datasets",
     )
 
+    # Mixture of Experts (SEED Alg.)
+    parser.add_argument("--moe", type=str, default=False, choices=[True, False])
+    parser.add_argument("--moe", type=str, default=False, choices=[True, False])
+
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
     parser.add_argument("--aug_resize_crop_max", type=float, default=1.0)
