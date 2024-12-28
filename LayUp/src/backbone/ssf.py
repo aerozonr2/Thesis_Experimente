@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from timm.models.layers import Mlp
+from timm.layers import Mlp
 from typing import Any, Callable, Union, Optional, Tuple
 
 from timm.models.vision_transformer import (

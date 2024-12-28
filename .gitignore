@@ -1,1 +1,3 @@
 *.pth
+/local_data/
+/LayUp/local_data/

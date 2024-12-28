@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from timm.models.layers import Mlp
+from timm.layers import Mlp
 import timm
 from functools import partial
 from timm.models.vision_transformer import Block

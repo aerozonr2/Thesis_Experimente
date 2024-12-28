@@ -23,6 +23,7 @@ from src.data import (
     update_transforms,
 )
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
+from torch.utils.data import Subset
 
 
 def set_seed(seed):
@@ -317,8 +318,26 @@ def load_model():
     print(f"Model loaded from {load_path}")
     return model
 
+def shrink_dataset(dataset, fraction=0.025):
+    """
+    Shrinks the dataset to a fraction of its original size.
+    
+    """
+    # Calculate the number of samples to keep
+    num_samples = int(len(dataset) * fraction)
+    
+    # Create a subset of the dataset
+    indices = list(range(num_samples))
+    subset = Subset(dataset, indices)
+    
+    return subset
+
+
 def use_moe(data_manager, train_transform, test_transform, args):
     model = MoE_SEED(args)
+    model.save_backbone_param_names()
+    model.num_classes = data_manager.num_classes
+
 
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
@@ -330,29 +349,33 @@ def use_moe(data_manager, train_transform, test_transform, args):
 
 
     # Save model incase of crash
-    save_path = os.path.join('.gitignore', 'model.pth')
+    save_path = os.path.join('model_checkpoints', 'model.pth')
     torch.save(model.backbone.state_dict(), save_path)
     print(f"Model saved to {save_path}")
 
 
     # Eval on all tasks up to t
     try:
+        model.freeze(fully=True) # Funktioniert
         print("model.freeze()")
-        model.freeze(fully=True)
     except:
         print(":(")
     try:
+        model.backbone.eval() # Funktioniert auch
         print("model.backbone.eval()")    
-        model.backbone.eval()
     except:
-        print("model.eval()")
         model.eval()
+        print("model.eval()")
     
-        eval_res = eval_datamanager(model.backbone, data_manager, t, args)
-        # log results
-        Logger.instance().log(eval_res)
+    # muss das in einen loop? Damit die einzelnen Tasks während des trainings schon evaluiert werden
+    eval_res = eval_datamanager(model.backbone, data_manager, t, args)
+    # log results
+    Logger.instance().log(eval_res)
 
 
+
+    # Print model summary
+    """
     print("Model Summary:")
 
     print("Vision Transformer Summary:")
@@ -405,9 +428,10 @@ def use_moe(data_manager, train_transform, test_transform, args):
                 find_activation_functions(child, activations)
         return activations
     
-    activations = find_activation_functions(model.backbone)
+    activations = find_activation_functions(model.backbone, activations)
     print(", ".join(set(activations)))
     print("=" * 40)
+    """
     
 
 
@@ -497,6 +521,12 @@ def main(args):
     )
     update_transforms(test_base_dataset, transform=test_transform)
 
+    # for faster testing reduce dataset
+    if args.reduce_dataset:
+        train_base_dataset = shrink_dataset(train_base_dataset)
+        test_base_dataset = shrink_dataset(test_base_dataset)
+        print("Reduced dataset size")
+
     # get datamanager based on ds
     data_manager = None
     if DILDataManager.is_dil(str(train_base_dataset)):
@@ -583,7 +613,8 @@ if __name__ == "__main__":
 
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
-    parser.add_argument("--moe_max_experts", type=int, default=5)
+    parser.add_argument("--moe_max_experts", type=int, default=3)
+    parser.add_argument("--reduce_dataset", default=False)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)

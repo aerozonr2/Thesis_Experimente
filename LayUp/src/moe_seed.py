@@ -45,6 +45,17 @@ class MoE_SEED(nn.Module):
         self.batch_size = args.batch_size
         self.finetune_epochs = args.finetune_epochs
         self.args = args
+        self.backbone_param_names = []
+        self.num_classes = None
+        self.alpha = 0.99 # Knowledge distillation parameter for the loss function. 1.0 means no knowledge distillation. 0.99 is from SEED.
+
+    @torch.no_grad()
+    def save_backbone_param_names(self):
+        if len(self.backbone_param_names) == 0:
+            for name, _ in self.backbone.named_parameters():
+                self.backbone_param_names.append(name)
+        else:
+            print("Backbone parameter names already saved.")
 
     def add_expert(self):
         # Add Expert
@@ -75,24 +86,28 @@ class MoE_SEED(nn.Module):
         self.create_distributions(t, trn_loader, val_loader)
         '''
 
-    def train_expert(self, t=None, train_dataset=None):
+    def train_expert(self, train_dataset=None):
         self.add_expert()
 
-        # model.add_head() ? (last layer?)
-
-        # Test
+        # Warum verändern sich die Tokens so wenig und warum sind die Zahken alle gleich?
         test_expert_vpt = self.backbone.vpt_prompt_tokens.clone().detach()
+        # will ich beim training einen Learning Rate Scheduler? SEED hat einen.
+        # Welchen loss soll ich nehmen? LayUp oder SEED?
 
 
-        #moodel.train() ist aber wichtig. ich muss also das ViT freezen und denn rest so lassen
-        # gut: 
-        # model.train()
-        # freeze_backbone()
-        # doof:
-        #self.freeze()
-        #self.unfreeze_peft()
-
-
+        # Add a linear head at the end of the network
+        num_features = self.backbone.num_features
+        num_classes = self.num_classes
+        self.backbone.head = nn.Linear(num_features, num_classes)
+ 
+        # Freeze the backbone parameters based on names except for the head
+        for name, param in self.backbone.named_parameters():
+            if name in self.backbone_param_names:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+        for param in self.backbone.head.parameters():
+            param.requires_grad = True
 
         # GPU/CPU
         model = self.backbone
@@ -100,11 +115,10 @@ class MoE_SEED(nn.Module):
 
         # Train model on task:
         optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
-        criterion = torch.nn.CrossEntropyLoss()
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
         for epoch in range(self.finetune_epochs):
-            model.train() # freeze() und unfreeze_peft sollten das übernehmen
+            model.train()
             running_loss = 0.0
             num_train_loader = len(train_loader)
             for batch_id, (inputs, labels) in enumerate(train_loader):
@@ -112,19 +126,28 @@ class MoE_SEED(nn.Module):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 outputs = model(inputs)
-                loss = criterion(outputs, labels)
+                loss = self.criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
 
+
+        # Save Expert parameters
+        expert_parameters = {}
+        for name, param in self.backbone.named_parameters():
+            if name in self.backbone_param_names:
+                pass # Not saving backbone parameters
+            else:
+                expert_parameters[name] = param
+        self.experts.append(copy.deepcopy(expert_parameters))
         
+
+
         print("VPT Tokens vorher:")
         print(test_expert_vpt)
         print("VPT Tokens nachher:")
-        print(self.backbone.vpt_prompt_tokens.clone().detach())
-        print("VPT Tokens nachher2:")
         print(self.backbone.vpt_prompt_tokens)
 
 
@@ -152,24 +175,19 @@ class MoE_SEED(nn.Module):
     def predict_class_bayes(self, t, features):
         pass   
     
-    def criterion(self, t, outputs, targets, features=None, old_features=None):
-        # unnötig?
-        pass
+    def criterion(self, outputs, targets, features=None, old_features=None):
+        """Returns the loss value"""
+        ce_loss = nn.functional.cross_entropy(outputs, targets, label_smoothing=0.0)
+        if old_features is not None:  # Knowledge distillation loss on features
+            kd_loss = nn.functional.mse_loss(features, old_features)
+            total_loss = (1 - self.alpha) * ce_loss + self.alpha * kd_loss
+            return total_loss
+        return ce_loss
     
     def _get_optimizer(self, num, wd, milestones=[60, 120, 160]):
-        # unnötig?
+        # unnötig?!
         pass
 
     def freeze(self, fully=False):
-        call_in_all_submodules(self, "freeze", fully=fully)
+        call_in_all_submodules(self.backbone, "freeze", fully=fully)
     
-    def unfreeze_peft(self):
-        # wahrscheinlich mit model.layer.parameters[i].requires_grad = True/False
-        if self.finetune_method == 'ssf':
-            pass
-        elif self.finetune_method == 'vpt':
-            pass
-        elif self.finetune_method == 'adapter':
-            pass
-        else:
-            raise ValueError('Invalid finetune method')
