@@ -1,15 +1,18 @@
 import argparse
 import random
 import torch
+from torch import nn
 import numpy as np
 from tqdm import tqdm
 import functools
+import os
 
 from torch.utils.data import DataLoader
 
 from src.backbone import get_backbone
 from src.modules import CosineLinear
 from src.layup import LayUP
+from src.moe_seed import MoE_SEED
 from src.data import (
     CILDataManager,
     DILDataManager,
@@ -210,6 +213,281 @@ def eval_dataset(model, dataset, args):
     return {"acc": acc}
 
 
+def use_layup(data_manager, train_transform, test_transform, args):
+    backbone = get_backbone(args.backbone, finetune_method=args.finetune_method)
+    model = LayUP(
+        backbone=backbone,
+        intralayers=args.intralayers,
+        num_classes=data_manager.num_classes,
+    )
+    model.to(args.device)
+
+    for t, (train_dataset, test_datatset) in enumerate(data_manager):
+        print(f"Task {t}")
+        print(f"Train dataset: {len(train_dataset)}")
+        print(f"Test dataset: {len(test_datatset)}")
+
+
+        model.freeze(fully=True)
+        model.eval()
+
+        train_dataset.transform = test_transform
+
+        # train Ridge regression
+        model.update_ridge(
+            DataLoader(
+                train_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=2,
+                pin_memory=True,
+            )
+        )
+
+        # eval on all tasks up to t
+        eval_res = eval_datamanager(model, data_manager, t, args)
+        # log results
+        Logger.instance().log(eval_res)
+
+
+
+    """
+    Print an organized summary of the important parts of a Vision Transformer.
+    Includes patch embedding, transformer blocks, classification head,
+    parameters, and activation functions.
+    """
+    print("Vision Transformer Summary:")
+    print("=" * 40)
+    
+    # Patch embedding layer
+    print("Patch Embedding Layer:")
+    print(model.patch_embed)
+    print("-" * 40)
+    
+    # Transformer blocks
+    print("Transformer Blocks:")
+    for i, block in enumerate(model.blocks):
+        print(f"Block {i + 1}:")
+        print(f"  Attention: {block.attn}")
+        print(f"  MLP: {block.mlp}")
+        
+        # Extract activation functions in the MLP
+        activation_functions = [
+            layer.__class__.__name__ for layer in block.mlp.fc2.children() 
+            if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
+        ]
+        if not activation_functions:  # If no activations are direct children, check deeper
+            activation_functions = [
+                layer.__class__.__name__ for layer in block.mlp.children()
+                if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
+            ]
+        print(f"  Activation Functions: {', '.join(activation_functions) if activation_functions else 'None Found'}")
+    print("-" * 40)
+    
+    # Classification head
+    print("Classification Head:")
+    print(model.head)
+    print("-" * 40)
+    
+    # Parameters summary
+    print("Parameters Summary:")
+    for name, param in model.named_parameters():
+        print(f"{name}: {param.shape}")
+    print("-" * 40)
+    
+    # Activation functions
+    print("Activation Functions:")
+    activations = []
+    def find_activation_functions(module, activations):
+        for child in module.children():
+            if isinstance(child, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh)):
+                activations.append(child.__class__.__name__)
+            else:
+                find_activation_functions(child, activations)
+        return activations
+    
+    activations = find_activation_functions(model)
+    print(", ".join(set(activations)))
+    print("=" * 40)
+
+def load_model():
+    model = MoE_SEED(args)
+    load_path = os.path.join('.gitignore', 'model.pth')
+    model.backbone.load_state_dict(torch.load(load_path))
+    print(f"Model loaded from {load_path}")
+    return model
+
+def use_moe(data_manager, train_transform, test_transform, args):
+    model = MoE_SEED(args)
+
+    # Trainloop for all tasks
+    for t, (train_dataset, test_datatset) in enumerate(data_manager):
+        print(f"Task {t}")
+        print(f"Train dataset: {len(train_dataset)}")
+        print(f"Test dataset: {len(test_datatset)}")
+        train_dataset.transform = train_transform
+        model.train_loop(t=t, train_dataset=train_dataset)
+
+
+    # Save model incase of crash
+    save_path = os.path.join('.gitignore', 'model.pth')
+    torch.save(model.backbone.state_dict(), save_path)
+    print(f"Model saved to {save_path}")
+
+
+    # Eval on all tasks up to t
+    try:
+        print("model.freeze()")
+        model.freeze(fully=True)
+    except:
+        print(":(")
+    try:
+        print("model.backbone.eval()")    
+        model.backbone.eval()
+    except:
+        print("model.eval()")
+        model.eval()
+    
+        eval_res = eval_datamanager(model.backbone, data_manager, t, args)
+        # log results
+        Logger.instance().log(eval_res)
+
+
+    print("Model Summary:")
+
+    print("Vision Transformer Summary:")
+    print("=" * 40)
+    
+    # Patch embedding layer
+    print("Patch Embedding Layer:")
+    print(model.backbone.patch_embed)
+    print("-" * 40)
+    
+    # Transformer blocks
+    print("Transformer Blocks:")
+    for i, block in enumerate(model.backbone.blocks):
+        print(f"Block {i + 1}:")
+        print(f"  Attention: {block.attn}")
+        print(f"  MLP: {block.mlp}")
+        
+        # Extract activation functions in the MLP
+        activation_functions = [
+            layer.__class__.__name__ for layer in block.mlp.fc2.children() 
+            if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
+        ]
+        if not activation_functions:  # If no activations are direct children, check deeper
+            activation_functions = [
+                layer.__class__.__name__ for layer in block.mlp.children()
+                if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
+            ]
+        print(f"  Activation Functions: {', '.join(activation_functions) if activation_functions else 'None Found'}")
+    print("-" * 40)
+    
+    # Classification head
+    print("Classification Head:")
+    print(model.backbone.head)
+    print("-" * 40)
+    
+    # Parameters summary
+    print("Parameters Summary:")
+    for name, param in model.backbone.named_parameters():
+        print(f"{name}: {param.shape}")
+    print("-" * 40)
+    
+    # Activation functions
+    print("Activation Functions:")
+    activations = []
+    def find_activation_functions(module, activations):
+        for child in module.children():
+            if isinstance(child, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh)):
+                activations.append(child.__class__.__name__)
+            else:
+                find_activation_functions(child, activations)
+        return activations
+    
+    activations = find_activation_functions(model.backbone)
+    print(", ".join(set(activations)))
+    print("=" * 40)
+    
+
+
+
+    # VPT Experts
+    '''
+    model = MoE_SEED(args)
+    # Only change are addition of vprompt tokens at the beginning
+    print("-----------------")
+    model = model.train_expert()
+    print(model.vpt_prompt_tokens)
+
+    print("--------change module at the end to identity--------")
+    test_expert_vpt = model.vpt_prompt_tokens.clone().detach()
+    with torch.no_grad():
+        model.vpt_prompt_tokens.fill_(1.0)
+    print(model.vpt_prompt_tokens)
+
+    print("--------change module back to original--------")
+    with torch.no_grad():
+        model.vpt_prompt_tokens.copy_(test_expert_vpt)
+    print(model.vpt_prompt_tokens)
+    '''
+
+    # Adapter Experts
+    '''
+    model = MoE_SEED(args)
+    for name, module in model.backbone.blocks[0].named_children():
+        print(f"{name}: {module}")
+
+    print("-----------------")
+
+    model = model.train_expert()
+    for name, module in model.blocks[0].named_children():
+        print(f"{name}: {module}")
+
+    print("--------change module at the end to identity--------")
+    test_expert_adaptmlp = model.blocks[0].adaptmlp
+    model.blocks[0].adaptmlp = nn.Identity()
+    for name, module in model.blocks[0].named_children():
+        print(f"{name}: {module}")
+    
+    print("--------change module back to original--------")
+    model.blocks[0].adaptmlp = test_expert_adaptmlp
+    for name, module in model.blocks[0].named_children():
+        print(f"{name}: {module}")
+    '''
+
+    # SSF Experts
+    '''
+    model = MoE_SEED(args)
+    for name, param in model.backbone.blocks[0].named_children():
+        print(f"Parameter name: {name}, Shape: {param}")
+
+    print("-----------------")
+    model = model.train_expert()
+    for name, param in model.blocks[0].named_children():
+        print(f"Parameter name: {name}, Shape: {param}")
+
+    print("--------mlp layers at the end--------")
+    test_expert_scale_layer = model.blocks[0].mlp.fc1_scale
+    test_expert_shift_layer = model.blocks[0].mlp.fc1_shift
+    print(model.blocks[0].mlp.fc1_scale)
+    print(model.blocks[0].mlp.fc1_shift)
+
+    print("--------replacement of layer with ones--------")
+    model.blocks[0].mlp.fc1_scale = torch.nn.Parameter(torch.ones_like(model.blocks[0].mlp.fc1_scale))
+    model.blocks[0].mlp.fc1_shift = torch.nn.Parameter(torch.ones_like(model.blocks[0].mlp.fc1_scale))
+    print(model.blocks[0].mlp.fc1_scale)
+    print(model.blocks[0].mlp.fc1_shift)
+
+    print("--------replacement of layer with original--------")
+    model.blocks[0].mlp.fc1_scale = test_expert_scale_layer
+    model.blocks[0].mlp.fc1_shift = test_expert_shift_layer
+    print(model.blocks[0].mlp.fc1_scale)
+    print(model.blocks[0].mlp.fc1_shift)
+    '''
+
+
+
 def main(args):
     # get dataset and augmentations
     train_transform = make_train_transform_from_args(args)
@@ -251,45 +529,13 @@ def main(args):
         }
     )
 
-    # get model
-    backbone = get_backbone(args.backbone, finetune_method=args.finetune_method)
-    model = LayUP(
-        backbone=backbone,
-        intralayers=args.intralayers,
-        num_classes=data_manager.num_classes,
-    )
-    model.to(args.device)
-
-    for t, (train_dataset, test_datatset) in enumerate(data_manager):
-        print(f"Task {t}")
-        print(f"Train dataset: {len(train_dataset)}")
-        print(f"Test dataset: {len(test_datatset)}")
-
-        # first session adaptation
-        if t == 0 and args.finetune_method != "none":
-            train_dataset.transform = train_transform
-            fsa(model, train_dataset, test_datatset, args)
-
-        model.freeze(fully=True)
-        model.eval()
-
-        train_dataset.transform = test_transform
-
-        # train Ridge regression
-        model.update_ridge(
-            DataLoader(
-                train_dataset,
-                batch_size=args.batch_size,
-                shuffle=False,
-                num_workers=2,
-                pin_memory=True,
-            )
-        )
-
-        # eval on all tasks up to t
-        eval_res = eval_datamanager(model, data_manager, t, args)
-        # log results
-        Logger.instance().log(eval_res)
+    # LayUp
+    if args.approach == "layup":
+        print("Using LayUp")
+        use_layup(data_manager, train_transform, test_transform, args)
+    else:
+        print("Using MoE")
+        use_moe(data_manager, train_transform, test_transform, args)
 
 
 if __name__ == "__main__":
@@ -335,9 +581,9 @@ if __name__ == "__main__":
         help="Root directory for datasets",
     )
 
-    # Mixture of Experts (SEED Alg.)
-    parser.add_argument("--moe", type=str, default=False, choices=[True, False])
-    parser.add_argument("--moe", type=str, default=False, choices=[True, False])
+    # Approach
+    parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
+    parser.add_argument("--moe_max_experts", type=int, default=5)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
