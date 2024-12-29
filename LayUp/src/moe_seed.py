@@ -72,7 +72,7 @@ class MoE_SEED(nn.Module):
         if t < self.max_experts:
             print(f"Training expert {t + 1} on task {t}:")
             self.experts_distributions.append([])
-            self.train_expert(t, train_dataset)
+            self.train_expert(train_dataset)
         else:
             if t == self.max_experts:
                 print("All experts trained.")  
@@ -90,10 +90,9 @@ class MoE_SEED(nn.Module):
         self.add_expert()
 
         # Warum verändern sich die Tokens so wenig und warum sind die Zahken alle gleich?
-        test_expert_vpt = self.backbone.vpt_prompt_tokens.clone().detach()
+        #test_expert_vpt = self.backbone.vpt_prompt_tokens.clone().detach()
         # will ich beim training einen Learning Rate Scheduler? SEED hat einen.
         # Welchen loss soll ich nehmen? LayUp oder SEED?
-
 
         # Add a linear head at the end of the network
         num_features = self.backbone.num_features
@@ -137,26 +136,43 @@ class MoE_SEED(nn.Module):
         # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
-            if name in self.backbone_param_names:
-                pass # Not saving backbone parameters
-            else:
+            if name not in self.backbone_param_names:
+                expert_parameters[name] = param # .clone() funktioniert nicht
+            elif name == 'head.weight' or name == 'head.bias':
                 expert_parameters[name] = param
+            else:
+                pass # Not saving backbone parameters except for the head
         self.experts.append(copy.deepcopy(expert_parameters))
         
 
 
-        print("VPT Tokens vorher:")
-        print(test_expert_vpt)
-        print("VPT Tokens nachher:")
-        print(self.backbone.vpt_prompt_tokens)
+        #print("VPT Tokens vorher:")
+        #print(test_expert_vpt)
+        #print("VPT Tokens nachher:")
+        #print(self.backbone.vpt_prompt_tokens)
 
 
+    def forward(self, x):
+        features = []
+        for expert_dict in self.experts:
+            for name, param in expert_dict.items():
+                self.backbone.state_dict()[name].copy_(param)
+            out = self.backbone(x)
+            print(f'Feature Output shape: {self.backbone.num_features}')
+            print(f'Label Output shape: {out.shape}')
+            features.append(out)
+        return torch.stack(features, dim=1)
+        # was ist mit dem head? Den speichere ich einfach mit. In SEED wird der glaube ich nicht gespeichert.
+        # was mache ich mit dem output?
+        # Der muss entweder geaveraged werden oder ich mache das mit bayes wie in SEED
+        # zweiteres wäre besser. Kann ich einfach die Funktion aus SEED kopieren?
     
     @torch.no_grad()
     def choose_expert_to_finetune(self, x):
         pass
     
     def finetune_expert(self, expert, trn_loader, val_loader):
+        # Was ist mit dem Head?
         pass
     
     @torch.no_grad()
@@ -164,8 +180,8 @@ class MoE_SEED(nn.Module):
         pass
         
     @torch.no_grad()
-    def eval(self, t, val_loader):
-        pass
+    def eval(self):
+        self.backbone.eval()
     
     @torch.no_grad()
     def calculate_metrics(self, features, targets, t):
@@ -187,7 +203,9 @@ class MoE_SEED(nn.Module):
     def _get_optimizer(self, num, wd, milestones=[60, 120, 160]):
         # unnötig?!
         pass
-
+'''
     def freeze(self, fully=False):
+        # Haben die einzelnen Blöcke eine Freeze Funktion?
+        # NO !!
         call_in_all_submodules(self.backbone, "freeze", fully=fully)
-    
+'''    

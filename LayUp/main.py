@@ -339,6 +339,7 @@ def use_moe(data_manager, train_transform, test_transform, args):
     model.num_classes = data_manager.num_classes
 
 
+
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
         print(f"Task {t}")
@@ -347,31 +348,43 @@ def use_moe(data_manager, train_transform, test_transform, args):
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
 
+        '''
+        # Save model incase of crash
+        save_path = os.path.join('model_checkpoints', 'model.pth')
+        torch.save(model.backbone.state_dict(), save_path)
+        print(f"Model saved to {save_path}")
 
-    # Save model incase of crash
-    save_path = os.path.join('model_checkpoints', 'model.pth')
-    torch.save(model.backbone.state_dict(), save_path)
-    print(f"Model saved to {save_path}")
+
+        # Freeze Model. kommt drauf an welche methoden ich in der Evaluation aus LayUp brauche
+        # Wahrschenlich model.eval() und model.freeze(fully=True)
+        # Und natürlich Foward
+        try:
+            model.freeze(fully=True) # Funktioniert technisch, freezed aber nicht alles
+            print("model.freeze()")
+        except:
+            print(":(")
+        try:
+            model.backbone.eval() # Funktioniert auch
+            print("model.backbone.eval()")    
+        except:
+            model.eval()
+            print("model.eval()") 
 
 
-    # Eval on all tasks up to t
-    try:
-        model.freeze(fully=True) # Funktioniert
-        print("model.freeze()")
-    except:
-        print(":(")
-    try:
-        model.backbone.eval() # Funktioniert auch
-        print("model.backbone.eval()")    
-    except:
-        model.eval()
-        print("model.eval()")
+
+        # Aus LayUp
+        # eval on all tasks up to t
+        eval_res = eval_datamanager(model, data_manager, t, args)
+        # log results
+        Logger.instance().log(eval_res)
+        '''
+
+
+    test = model(x=torch.randn(1, 3, 224, 224)) # Test forward pass
+    print(test.shape)
+    return None
+
     
-    # muss das in einen loop? Damit die einzelnen Tasks während des trainings schon evaluiert werden
-    eval_res = eval_datamanager(model.backbone, data_manager, t, args)
-    # log results
-    Logger.instance().log(eval_res)
-
 
 
     # Print model summary
@@ -613,7 +626,7 @@ if __name__ == "__main__":
 
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
-    parser.add_argument("--moe_max_experts", type=int, default=3)
+    parser.add_argument("--moe_max_experts", type=int, default=2)
     parser.add_argument("--reduce_dataset", default=False)
 
     # augmentations
