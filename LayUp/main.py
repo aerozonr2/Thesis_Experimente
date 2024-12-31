@@ -339,9 +339,16 @@ def use_moe(data_manager, train_transform, test_transform, args):
     model.num_classes = data_manager.num_classes
 
 
+    
+    
+
 
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
+        
+        train_dataset.transform = train_transform
+        test = model.create_distributions(0, train_dataset)
+        return None
         print(f"Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
@@ -446,8 +453,6 @@ def use_moe(data_manager, train_transform, test_transform, args):
     print("=" * 40)
     """
     
-
-
 
     # VPT Experts
     '''
@@ -606,10 +611,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--finetune_method",
         type=str,
-        default="none",
+        default="vpt",
         choices=["none", "adapter", "ssf", "vpt"],
     )
-    parser.add_argument("--finetune_epochs", type=int, default=20)
+    parser.add_argument("--finetune_epochs", type=int, default=1)
     parser.add_argument("--k", type=int, default=6)
 
     # misc
@@ -627,7 +632,7 @@ if __name__ == "__main__":
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
     parser.add_argument("--moe_max_experts", type=int, default=2)
-    parser.add_argument("--reduce_dataset", default=False)
+    parser.add_argument("--reduce_dataset", default=True)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)

@@ -1,5 +1,4 @@
 import torch
-from argparse import ArgumentParser
 from torch.distributions import MultivariateNormal
 from torch.utils.data import DataLoader
 import timm
@@ -7,6 +6,10 @@ from .backbone.adapter import add_adapters
 from .backbone.ssf import add_ssf
 from .backbone.vpt import add_vpt
 from .backbone.util import call_in_all_submodules
+from .approach.mvgb import ClassMemoryDataset, ClassDirectoryDataset
+from .approach.gmm import GaussianMixture
+
+
 
 
 
@@ -48,6 +51,7 @@ class MoE_SEED(nn.Module):
         self.backbone_param_names = []
         self.num_classes = None
         self.alpha = 0.99 # Knowledge distillation parameter for the loss function. 1.0 means no knowledge distillation. 0.99 is from SEED.
+        self.taskcla = []
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -69,6 +73,8 @@ class MoE_SEED(nn.Module):
             raise ValueError('Invalid finetune method')
 
     def train_loop(self, t, train_dataset):
+        self.taskcla.append([])
+
         if t < self.max_experts:
             print(f"Training expert {t + 1} on task {t}:")
             self.experts_distributions.append([])
@@ -152,20 +158,40 @@ class MoE_SEED(nn.Module):
         #print(self.backbone.vpt_prompt_tokens)
 
 
+    def switch_to_expert(self, expert_index):
+        for name, param in self.experts[expert_index].items():
+            self.backbone.state_dict()[name].copy_(param)
+
     def forward(self, x):
         features = []
-        for expert_dict in self.experts:
-            for name, param in expert_dict.items():
-                self.backbone.state_dict()[name].copy_(param)
+        for expert_index in range(len(self.experts)):
+            self.switch_to_expert(expert_index)
             out = self.backbone(x)
             print(f'Feature Output shape: {self.backbone.num_features}')
             print(f'Label Output shape: {out.shape}')
             features.append(out)
-        return torch.stack(features, dim=1)
+        #return torch.stack(features, dim=1) # Stack the features to get a tensor of shape (?, num_experts, logits_of_classes) as in SEED
+
+
+        # Stack the features to get a tensor of shape (1, num_experts, logits_of_classes)
+        features = torch.stack(features, dim=1)
+        
+        # Compute the mean along the num_experts dimension (dimension 1)
+        average_logits = torch.mean(features, dim=1)
+        
+        # Squeeze the tensor to remove the singleton dimension
+        average_logits = average_logits.squeeze(0)
+        
+        print(f'Average Logits shape: {average_logits.shape}')
+        print(average_logits)
+        return average_logits
+
+
         # was ist mit dem head? Den speichere ich einfach mit. In SEED wird der glaube ich nicht gespeichert.
         # was mache ich mit dem output?
         # Der muss entweder geaveraged werden oder ich mache das mit bayes wie in SEED
         # zweiteres wäre besser. Kann ich einfach die Funktion aus SEED kopieren?
+        # Als Prototyp nehme ich erstmal den Average.
     
     @torch.no_grad()
     def choose_expert_to_finetune(self, x):
@@ -176,8 +202,77 @@ class MoE_SEED(nn.Module):
         pass
     
     @torch.no_grad()
-    def create_distributions(self, t, trn_loader, val_loader):
-        pass
+    def create_distributions(self, t, train_dataset):
+        """ Create distributions for task t"""
+        # benutze ich compose? bzw benutze ich für die Distributions die gleichen Transforms wie für das Training?
+        self.backbone.eval()
+        classes = train_dataset.num_classes
+
+        
+        #self.model.task_offset.append(self.model.task_offset[-1] + classes)
+        
+        #transforms = val_loader.dataset.transform
+        transforms = train_dataset.transform
+        print(transforms.transforms)
+        print("-----------------")
+        print(transforms.transforms[0])
+        print("-----------------")
+        dataloader = DataLoader(
+            train_dataset,
+            batch_size=64,
+            shuffle=False,
+            num_workers=2,
+            pin_memory=True,
+        )
+        for i, (x, y) in enumerate(dataloader):
+            print(x.shape)
+            print(y.shape)
+            print(y)
+            if i == 2:
+                break
+        return None
+        # iterate over all experts
+        for expert_index in range(min(self.max_experts, t+1)):
+            eps = 1e-8
+            self.switch_to_expert(expert_index)
+            model = self.backbone
+            for c in range(classes):
+                #c = c + self.model.task_offset[t]
+                train_indices = torch.tensor(trn_loader.dataset.labels) == c
+                if isinstance(trn_loader.dataset.images, list):
+                    train_images = list(compress(trn_loader.dataset.images, train_indices))
+                    ds = ClassDirectoryDataset(train_images, transforms)
+                else:
+                    ds = trn_loader.dataset.images[train_indices]
+                    ds = ClassMemoryDataset(ds, transforms)
+                loader = torch.utils.data.DataLoader(ds, batch_size=128, shuffle=False) # num_workers=trn_loader.num_workers as parameter?
+                from_ = 0
+                class_features = torch.full((2 * len(ds), self.model.num_features), fill_value=-999999999.0, device=self.device)
+                for images in loader:
+                    bsz = images.shape[0]
+                    images = images.to(self.device)
+                    features = model(images)
+                    class_features[from_: from_+bsz] = features
+                    features = model(torch.flip(images, dims=(3,)))
+                    class_features[from_+bsz: from_+2*bsz] = features
+                    from_ += 2*bsz
+
+                # Calculate distributions
+                cov_type = "full" if self.use_multivariate else "diag"
+                is_ok = False
+                while not is_ok:
+                    try:
+                        gmm = GaussianMixture(self.gmms, class_features.shape[1], covariance_type=cov_type, eps=eps).to(self.device)
+                        gmm.fit(class_features, delta=1e-3, n_iter=100)
+                    except RuntimeError:
+                        eps = 10 * eps
+                        print(f"WARNING: Covariance matrix is singular. Increasing eps to: {eps:.7f} but this may hurt results")
+                    else:
+                        is_ok = True
+
+                if len(gmm.mu.data.shape) == 2:
+                    gmm.mu.data = gmm.mu.data.unsqueeze(1)
+                self.experts_distributions[expert_index].append(gmm)
         
     @torch.no_grad()
     def eval(self):
