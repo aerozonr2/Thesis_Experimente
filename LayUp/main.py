@@ -532,7 +532,7 @@ def main(args):
     update_transforms(test_base_dataset, transform=test_transform)
 
     # for faster testing reduce dataset
-    if args.reduce_dataset:
+    if args.reduce_dataset == "True":
         train_base_dataset = shrink_dataset(train_base_dataset)
         test_base_dataset = shrink_dataset(test_base_dataset)
         print("Reduced dataset size")
@@ -624,7 +624,7 @@ if __name__ == "__main__":
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
     parser.add_argument("--moe_max_experts", type=int, default=2)
-    parser.add_argument("--reduce_dataset", default=True)
+    parser.add_argument("--reduce_dataset", default="True")
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
