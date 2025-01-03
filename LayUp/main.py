@@ -339,22 +339,18 @@ def use_moe(data_manager, train_transform, test_transform, args):
     model.num_classes = data_manager.num_classes
 
 
-    
-    
 
 
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
         
-        #train_dataset.transform = train_transform
-        #test = model.create_distributions(0, train_dataset)
-        #return None
+        train_dataset.transform = train_transform
         print(f"Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
-
+        #return None
         '''
         # Save model incase of crash
         save_path = os.path.join('model_checkpoints', 'model.pth')
@@ -625,6 +621,8 @@ if __name__ == "__main__":
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
     parser.add_argument("--moe_max_experts", type=int, default=2)
     parser.add_argument("--reduce_dataset", default="True")
+    parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
+    parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)

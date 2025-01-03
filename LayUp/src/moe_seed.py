@@ -52,6 +52,8 @@ class MoE_SEED(nn.Module):
         self.num_classes = None
         self.alpha = 0.99 # Knowledge distillation parameter for the loss function. 1.0 means no knowledge distillation. 0.99 is from SEED.
         self.taskcla = []
+        self.gmms = args.gmms
+        self.use_multivariate = args.use_multivariate
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -74,14 +76,15 @@ class MoE_SEED(nn.Module):
 
     def train_loop(self, t, train_dataset):
         self.taskcla.append([])
-
         if t < self.max_experts:
             print(f"Training expert {t + 1} on task {t}:")
             self.experts_distributions.append([])
             self.train_expert(train_dataset)
         else:
             if t == self.max_experts:
-                print("All experts trained.")  
+                print("All experts trained.")
+        #self.create_distributions(t, train_dataset) ## test
+        #return None ## Test  
         '''
         if t >= self.max_experts:
             expert_to_finetune = self.choose_expert_to_finetune(t, trn_loader, val_loader)
@@ -89,7 +92,7 @@ class MoE_SEED(nn.Module):
             self.finetune_expert(t, expert_to_finetune, trn_loader, val_loader)
 
         print(f"Creating distributions for task {t}:")
-        self.create_distributions(t, trn_loader, val_loader)
+        self.create_distributions(t, train_dataset)
         '''
 
     def train_expert(self, train_dataset=None):
@@ -104,7 +107,7 @@ class MoE_SEED(nn.Module):
         num_features = self.backbone.num_features
         num_classes = self.num_classes
         self.backbone.head = nn.Linear(num_features, num_classes)
- 
+
         # Freeze the backbone parameters based on names except for the head
         for name, param in self.backbone.named_parameters():
             if name in self.backbone_param_names:
@@ -204,69 +207,77 @@ class MoE_SEED(nn.Module):
     @torch.no_grad()
     def create_distributions(self, t, train_dataset):
         """ Create distributions for task t"""
-        # benutze ich compose? bzw benutze ich für die Distributions die gleichen Transforms wie für das Training?
-        self.backbone.eval()
-        classes = train_dataset.num_classes
-
-        
-        #self.model.task_offset.append(self.model.task_offset[-1] + classes)
-        
-        #transforms = val_loader.dataset.transform
-        transforms = train_dataset.transform
-        print(transforms.transforms)
-        print("-----------------")
-        print(transforms.transforms[0])
-        print("-----------------")
-        dataloader = DataLoader(
+        num_classes = train_dataset.num_classes
+        sorting_dataloader = DataLoader(
             train_dataset,
             batch_size=64,
             shuffle=False,
             num_workers=2,
-            pin_memory=True,
+            pin_memory=False
         )
-        '''
-        for i, (x, y) in enumerate(dataloader):
-            print(x.shape)
-            print(y.shape)
-            print(y)
-            if i == 2:
-                break
-        return None
-        '''
-        '''
-        # iterate over all experts
-        for expert_index in range(min(self.max_experts, t+1)):
-            eps = 1e-8
-            self.switch_to_expert(expert_index)
-            model = self.backbone
-            for c in range(classes):
-                #c = c + self.model.task_offset[t]
-                train_indices = torch.tensor(trn_loader.dataset.labels) == c
-                if isinstance(trn_loader.dataset.images, list):
-                    train_images = list(compress(trn_loader.dataset.images, train_indices))
-                    ds = ClassDirectoryDataset(train_images, transforms)
-                else:
-                    ds = trn_loader.dataset.images[train_indices]
-                    ds = ClassMemoryDataset(ds, transforms)
-                loader = torch.utils.data.DataLoader(ds, batch_size=128, shuffle=False) # num_workers=trn_loader.num_workers as parameter?
+
+        # Collect all images and labels needs much time
+        all_images = []
+        all_labels = []
+        # Iterate over the DataLoader to collect images and labels
+        for images, labels in sorting_dataloader:
+            all_images.append(images)
+            all_labels.append(labels)
+        # Concatenate all batches into a single tensor
+        all_images = torch.cat(all_images)
+        all_labels = torch.cat(all_labels)
+
+
+        # Iterate over each class
+        unique_labels = all_labels.unique()
+        for class_label in unique_labels:
+            # Get all images of the class
+            class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
+            class_images = all_images[class_indices]
+
+            
+            class_loader = DataLoader(
+                class_images,
+                batch_size=64,
+                shuffle=False,
+                num_workers=2,
+                pin_memory=True
+            )
+
+
+            # iterate over all experts
+            num_loops = min(self.max_experts, t+1)
+            print(num_loops)
+            for expert_index in range(num_loops):
+                print(expert_index)
+                self.switch_to_expert(expert_index)
+                model = self.backbone
+                model.head = nn.Identity() # Dadurch kann man beim nächsten loopen den head nicht mehr ersetzten. Es gibt den namen "head" nicht mehr, weil das jetzt identity ist.
+                model.eval()
+                model.to(self.device)
+                
+
                 from_ = 0
-                class_features = torch.full((2 * len(ds), self.model.num_features), fill_value=-999999999.0, device=self.device)
-                for images in loader:
+                class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
+                # Process each image in the class and its flipped version
+                for images in class_loader:
                     bsz = images.shape[0]
                     images = images.to(self.device)
                     features = model(images)
-                    class_features[from_: from_+bsz] = features
+                    class_features[from_: from_+bsz, :] = features
                     features = model(torch.flip(images, dims=(3,)))
-                    class_features[from_+bsz: from_+2*bsz] = features
+                    class_features[from_+bsz: from_+2*bsz, :] = features
                     from_ += 2*bsz
 
                 # Calculate distributions
                 cov_type = "full" if self.use_multivariate else "diag"
                 is_ok = False
+                eps = 1e-8
                 while not is_ok:
                     try:
                         gmm = GaussianMixture(self.gmms, class_features.shape[1], covariance_type=cov_type, eps=eps).to(self.device)
                         gmm.fit(class_features, delta=1e-3, n_iter=100)
+                        print("fitting worked")
                     except RuntimeError:
                         eps = 10 * eps
                         print(f"WARNING: Covariance matrix is singular. Increasing eps to: {eps:.7f} but this may hurt results")
@@ -276,7 +287,9 @@ class MoE_SEED(nn.Module):
                 if len(gmm.mu.data.shape) == 2:
                     gmm.mu.data = gmm.mu.data.unsqueeze(1)
                 self.experts_distributions[expert_index].append(gmm)
-        '''
+                print("added gmm")
+                
+        
     @torch.no_grad()
     def eval(self):
         self.backbone.eval()
