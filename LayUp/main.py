@@ -346,9 +346,9 @@ def use_moe(data_manager, train_transform, test_transform, args):
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
         
-        train_dataset.transform = train_transform
-        test = model.create_distributions(0, train_dataset)
-        return None
+        #train_dataset.transform = train_transform
+        #test = model.create_distributions(0, train_dataset)
+        #return None
         print(f"Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
@@ -360,7 +360,7 @@ def use_moe(data_manager, train_transform, test_transform, args):
         save_path = os.path.join('model_checkpoints', 'model.pth')
         torch.save(model.backbone.state_dict(), save_path)
         print(f"Model saved to {save_path}")
-
+        '''
 
         # Freeze Model. kommt drauf an welche methoden ich in der Evaluation aus LayUp brauche
         # Wahrschenlich model.eval() und model.freeze(fully=True)
@@ -384,14 +384,6 @@ def use_moe(data_manager, train_transform, test_transform, args):
         eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
         Logger.instance().log(eval_res)
-        '''
-
-
-    test = model(x=torch.randn(1, 3, 224, 224)) # Test forward pass
-    print(test.shape)
-    return None
-
-    
 
 
     # Print model summary

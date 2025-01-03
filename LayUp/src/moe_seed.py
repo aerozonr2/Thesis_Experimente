@@ -224,6 +224,7 @@ class MoE_SEED(nn.Module):
             num_workers=2,
             pin_memory=True,
         )
+        '''
         for i, (x, y) in enumerate(dataloader):
             print(x.shape)
             print(y.shape)
@@ -231,6 +232,8 @@ class MoE_SEED(nn.Module):
             if i == 2:
                 break
         return None
+        '''
+        '''
         # iterate over all experts
         for expert_index in range(min(self.max_experts, t+1)):
             eps = 1e-8
@@ -273,7 +276,7 @@ class MoE_SEED(nn.Module):
                 if len(gmm.mu.data.shape) == 2:
                     gmm.mu.data = gmm.mu.data.unsqueeze(1)
                 self.experts_distributions[expert_index].append(gmm)
-        
+        '''
     @torch.no_grad()
     def eval(self):
         self.backbone.eval()
