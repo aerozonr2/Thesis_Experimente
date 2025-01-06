@@ -46,7 +46,8 @@ class MoE_SEED(nn.Module):
         self.device = args.device
         self.lr = args.lr
         self.batch_size = args.batch_size
-        self.finetune_epochs = args.finetune_epochs
+        self.finetune_epochs = args.moe_finetune_epochs
+        self.train_epochs = args.moe_train_epochs
         self.args = args
         self.backbone_param_names = []
         self.num_classes = None
@@ -54,6 +55,7 @@ class MoE_SEED(nn.Module):
         self.taskcla = []
         self.gmms = args.gmms
         self.use_multivariate = args.use_multivariate
+        self.selection_method = args.selection_method
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -87,13 +89,37 @@ class MoE_SEED(nn.Module):
         #return None ## Test  
         '''
         if t >= self.max_experts:
-            expert_to_finetune = self.choose_expert_to_finetune(t, trn_loader, val_loader)
+            expert_to_finetune = self.choose_expert_to_finetune(t, train_dataset)
             print(f"Finetuning expert {expert_to_finetune} on task {t}:")
-            self.finetune_expert(t, expert_to_finetune, trn_loader, val_loader)
-
+            #self.finetune_expert(t=t, expert_index=expert_to_finetune, train_dataset)
+        
         print(f"Creating distributions for task {t}:")
         self.create_distributions(t, train_dataset)
         '''
+
+    def freeze_ViT_unfreeze_PEFT(self, model=None):
+        # Freeze the backbone parameters based on names except for the head
+        # Model as parameter
+        if model is not None:
+            for name, param in model.named_parameters():
+                if name in self.backbone_param_names:
+                    if name == 'head.weight' or name == 'head.bias':
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+                else:
+                    param.requires_grad = True
+            return model
+        
+        # Backbone
+        for name, param in self.backbone.named_parameters():
+            if name in self.backbone_param_names:
+                if name == 'head.weight' or name == 'head.bias':
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+            else:
+                param.requires_grad = True
 
     def train_expert(self, train_dataset=None):
         self.add_expert()
@@ -108,6 +134,7 @@ class MoE_SEED(nn.Module):
         num_classes = self.num_classes
         self.backbone.head = nn.Linear(num_features, num_classes)
 
+        # lieber die freeze Funktion nutzen?
         # Freeze the backbone parameters based on names except for the head
         for name, param in self.backbone.named_parameters():
             if name in self.backbone_param_names:
@@ -125,12 +152,12 @@ class MoE_SEED(nn.Module):
         optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
-        for epoch in range(self.finetune_epochs):
+        for epoch in range(self.train_epochs):
             model.train()
             running_loss = 0.0
             num_train_loader = len(train_loader)
             for batch_id, (inputs, labels) in enumerate(train_loader):
-                print(f'Epoch: {epoch}, Batch?: {batch_id + 1}/{num_train_loader}')
+                print(f'Epoch: {epoch}, Batch: {batch_id + 1}/{num_train_loader}')
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 outputs = model(inputs)
@@ -154,7 +181,11 @@ class MoE_SEED(nn.Module):
         self.experts.append(copy.deepcopy(expert_parameters))
         
 
+        # Validation while training?!
+        # Generell wandb anschließen
 
+        
+        # könnte man auch in einer WandB Metrik verpacken
         #print("VPT Tokens vorher:")
         #print(test_expert_vpt)
         #print("VPT Tokens nachher:")
@@ -162,16 +193,21 @@ class MoE_SEED(nn.Module):
 
 
     def switch_to_expert(self, expert_index):
+        # das mit dem head und identity muss ich nochmal testen und gucken obder head name wirklich gelöscht wird, oder ob ic das als eigenen parameter selbst implementieren muss.
         for name, param in self.experts[expert_index].items():
-            self.backbone.state_dict()[name].copy_(param)
+            if name == 'head.weight' or name == 'head.bias':
+                try:
+                    self.backbone.state_dict()[name].copy_(param)
+                except:
+                    print(f"Could not copy {name}")
+            else:
+                self.backbone.state_dict()[name].copy_(param)
 
     def forward(self, x):
         features = []
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
             out = self.backbone(x)
-            print(f'Feature Output shape: {self.backbone.num_features}')
-            print(f'Label Output shape: {out.shape}')
             features.append(out)
         #return torch.stack(features, dim=1) # Stack the features to get a tensor of shape (?, num_experts, logits_of_classes) as in SEED
 
@@ -185,8 +221,6 @@ class MoE_SEED(nn.Module):
         # Squeeze the tensor to remove the singleton dimension
         average_logits = average_logits.squeeze(0)
         
-        print(f'Average Logits shape: {average_logits.shape}')
-        print(average_logits)
         return average_logits
 
 
@@ -197,17 +231,126 @@ class MoE_SEED(nn.Module):
         # Als Prototyp nehme ich erstmal den Average.
     
     @torch.no_grad()
-    def choose_expert_to_finetune(self, x):
+    def choose_expert_to_finetune(self, t, train_dataset):
+        self.create_distributions(t, train_dataset)
+        if self.selection_method == 'random':
+            return self.selection_random()
+        elif self.selection_method == 'eucld_dist':
+            return self.selection_euclidean_distance(t, train_dataset)
+        elif self.selection_method == 'kl_div':
+            return self.selection_kl_divergence(t, train_dataset)
+        elif self.selection_method == 'ws_div':
+            return self.selection_ws_divergence()
+        else:
+            raise ValueError('Invalid selection method')
+    
+    def selection_random(self):
+        # Randomly choose an expert to finetune
+        return random.randint(0, self.max_experts - 1)
+    
+    def selection_euclidean_distance(self, t):
+        # Euclidean distance between the current task distribution and the distributions of the experts
         pass
     
-    def finetune_expert(self, expert, trn_loader, val_loader):
-        # Was ist mit dem Head?
+    def selection_kl_divergence(self, t):
+        # KL divergence between the current task distribution and the distributions of the experts
+        expert_overlap = torch.zeros(self.max_experts, device=self.device)
+        for expert_index in range(self.max_experts):
+            self.switch_to_expert(expert_index)
+            expert_overlap[expert_index] = self.calculate_kl_divergences(t, expert_index)
+            new_distributions = self.experts_distributions[expert_index]
+            kl_matrix = torch.zeros((len(new_distributions), len(new_distributions)), device=self.device)
+            
+            for o, old_gauss_ in enumerate(new_distributions):
+                old_gauss = MultivariateNormal(old_gauss_.mu.data[0][0], covariance_matrix=old_gauss_.var.data[0][0])
+                for n, new_gauss_ in enumerate(new_distributions):
+                    new_gauss = MultivariateNormal(new_gauss_.mu.data[0][0], covariance_matrix=new_gauss_.var.data[0][0])
+                    kl_matrix[n, o] = torch.distributions.kl_divergence(new_gauss, old_gauss)
+            
+        
+            expert_overlap[expert_index] = torch.mean(kl_matrix)
+
+        expert_to_finetune = torch.argmax(expert_overlap)
+        return int(expert_to_finetune)
+
+    def selection_ws_divergence(self, t, train_dataset):
+        # Wasserstein divergence between the current task distribution and the distributions of the experts    
         pass
+
+    def finetune_expert(self, t, expert_index, train_dataset):
+        # Was ist mit dem Head? Muss ich beim tauschen der heads mehr copy.deepcopy machen?
+        # muss ich die Worker der DataLoader löschen oder die dataloader von memory befreien?
+        # generell mit model = self.backbone. Wann das ein Pointer? und wann muss ich das kopieren?
+        # Der als modul muss irgendwie da bleiben
+        print(f"Finetuning expert {expert_index} on task {t}:")
+        self.switch_to_expert(expert_index)
+        old_model = copy.deepcopy(self.backbone)
+        old_model.eval()
+
+        # Add a linear head at the end of the network
+        num_features = self.backbone.num_features
+        num_classes = self.num_classes
+        model = self.backbone
+        model.head = nn.Linear(num_features, num_classes)
+        
+        model = self.freeze_ViT_unfreeze_PEFT()
+        model.to(self.device)
+
+        # Train model on task:
+        # muss als Funktion implementiert werden, weil ich das mehrmals brauche (training, fintuning)
+        optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
+        for epoch in range(self.moe_finetune_epochs):
+            model.train()
+            for m in model.modules():
+                if isinstance(m, nn.BatchNorm2d):
+                    m.eval()
+            
+            running_loss = 0.0
+            num_train_loader = len(train_loader)
+            for batch_id, (inputs, labels) in enumerate(train_loader):
+                print(f'Epoch: {epoch}, Batch: {batch_id + 1}/{num_train_loader}')
+                bsz = inputs.shape[0]
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                optimizer.zero_grad()
+                with torch.no_grad():
+                        old_features = old_model(inputs) # Muss Identity head haben!
+                outputs = model(inputs)
+                features = model.forward_features(inputs)
+
+                loss = self.criterion(outputs, labels, features, old_features)
+                loss.backward()
+                optimizer.step()
+                running_loss += loss.item()
+
+            print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
+
+
+        # Save Expert parameters
+        expert_parameters = {}
+        for name, param in self.backbone.named_parameters():
+            if name not in self.backbone_param_names:
+                expert_parameters[name] = param # .clone() funktioniert nicht
+            elif name == 'head.weight' or name == 'head.bias':
+                expert_parameters[name] = param
+            else:
+                pass # Not saving backbone parameters except for the head
+        self.experts[expert_index] = copy.deepcopy(expert_parameters)
+        
+
+        # Validation while training?!
+        # Generell wandb anschließen
+        # Welche Metriken will ich speichern?
+
+
+        #print("VPT Tokens vorher:")
+        #print(test_expert_vpt)
+        #print("VPT Tokens nachher:")
+        #print(self.backbone.vpt_prompt_tokens)
     
     @torch.no_grad()
     def create_distributions(self, t, train_dataset):
         """ Create distributions for task t"""
-        num_classes = train_dataset.num_classes
         sorting_dataloader = DataLoader(
             train_dataset,
             batch_size=64,
@@ -227,7 +370,6 @@ class MoE_SEED(nn.Module):
         all_images = torch.cat(all_images)
         all_labels = torch.cat(all_labels)
 
-
         # Iterate over each class
         unique_labels = all_labels.unique()
         for class_label in unique_labels:
@@ -235,7 +377,6 @@ class MoE_SEED(nn.Module):
             class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
             class_images = all_images[class_indices]
 
-            
             class_loader = DataLoader(
                 class_images,
                 batch_size=64,
@@ -243,7 +384,6 @@ class MoE_SEED(nn.Module):
                 num_workers=2,
                 pin_memory=True
             )
-
 
             # iterate over all experts
             num_loops = min(self.max_experts, t+1)
@@ -288,8 +428,7 @@ class MoE_SEED(nn.Module):
                     gmm.mu.data = gmm.mu.data.unsqueeze(1)
                 self.experts_distributions[expert_index].append(gmm)
                 print("added gmm")
-                
-        
+
     @torch.no_grad()
     def eval(self):
         self.backbone.eval()
@@ -305,7 +444,7 @@ class MoE_SEED(nn.Module):
     def criterion(self, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""
         ce_loss = nn.functional.cross_entropy(outputs, targets, label_smoothing=0.0)
-        if old_features is not None:  # Knowledge distillation loss on features
+        if old_features is not None:  # Knowledge distillation 
             kd_loss = nn.functional.mse_loss(features, old_features)
             total_loss = (1 - self.alpha) * ce_loss + self.alpha * kd_loss
             return total_loss
