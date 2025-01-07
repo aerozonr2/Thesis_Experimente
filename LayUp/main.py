@@ -27,6 +27,8 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
+from support_functions import check_gpu_memory, shrink_dataset
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -320,20 +322,6 @@ def load_model():
     print(f"Model loaded from {load_path}")
     return model
 
-def shrink_dataset(dataset, fraction=0.25):
-    """
-    Shrinks the dataset to a fraction of its original size.
-    
-    """
-    # Calculate the number of samples to keep
-    num_samples = int(len(dataset) * fraction)
-    
-    # Create a subset of the dataset
-    indices = list(range(num_samples))
-    subset = Subset(dataset, indices)
-    
-    return subset
-
 
 def use_moe(data_manager, train_transform, test_transform, args):
     model = MoE_SEED(args)
@@ -516,6 +504,8 @@ def use_moe(data_manager, train_transform, test_transform, args):
 
 
 def main(args):
+    check_gpu_memory()
+    return None
     # get dataset and augmentations
     train_transform = make_train_transform_from_args(args)
     test_transform = make_test_transform_from_args(args)
