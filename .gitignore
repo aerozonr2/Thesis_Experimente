@@ -2,3 +2,6 @@
 /local_data/
 /LayUp/local_data/
 .venv/
+**/__pycache__
+*.log
+**/wandb/
