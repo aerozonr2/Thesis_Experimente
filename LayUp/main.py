@@ -8,6 +8,7 @@ import functools
 import os
 import cProfile
 
+import wandb
 
 from torch.utils.data import DataLoader
 
@@ -27,7 +28,7 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
-from support_functions import check_gpu_memory, shrink_dataset
+from src.support_functions import check_gpu_memory, shrink_dataset, load_model
 
 
 def set_seed(seed):
@@ -315,12 +316,6 @@ def use_layup(data_manager, train_transform, test_transform, args):
     print(", ".join(set(activations)))
     print("=" * 40)
 
-def load_model():
-    model = MoE_SEED(args)
-    load_path = os.path.join('.gitignore', 'model.pth')
-    model.backbone.load_state_dict(torch.load(load_path))
-    print(f"Model loaded from {load_path}")
-    return model
 
 
 def use_moe(data_manager, train_transform, test_transform, args):
@@ -504,8 +499,6 @@ def use_moe(data_manager, train_transform, test_transform, args):
 
 
 def main(args):
-    check_gpu_memory()
-    return None
     # get dataset and augmentations
     train_transform = make_train_transform_from_args(args)
     test_transform = make_test_transform_from_args(args)
@@ -545,13 +538,12 @@ def main(args):
             },
             blacklist_types=[WandbLogger],
         )
-
+        
     Logger.instance().log(
         {
             "num_classes": data_manager.num_classes,
         }
     )
-
     # LayUp
     if args.approach == "layup":
         print("Using LayUp")
@@ -611,8 +603,8 @@ if __name__ == "__main__":
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="random", choices=["random", "eucld_dist", "kl_div", "ws_div"])
-    parser.add_argument('--moe_train_epochs', help='Num training epochs for expert initialisation', default=2)
-    parser.add_argument('--moe_finetune_epochs', help='Num finetune epochs for expert finetuning', default=2)
+    parser.add_argument('--moe_train_epochs', type=int, help='Num training epochs for expert initialisation', default=2)
+    parser.add_argument('--moe_finetune_epochs', type=int, help='Num finetune epochs for expert finetuning', default=2)
 
 
     # augmentations
@@ -635,6 +627,10 @@ if __name__ == "__main__":
 
     setup_logger(args)
 
-    main(args)
-    # cProfile.run('main(args)', 'cProfile/profile_output.prof')
-    # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen
+
+    try:
+        cProfile.run('main(args)', 'cProfile/profile_output.prof')
+        # main(args)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen ?

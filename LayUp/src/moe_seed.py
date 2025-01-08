@@ -10,10 +10,7 @@ from .approach.mvgb import ClassMemoryDataset, ClassDirectoryDataset
 from .approach.gmm import GaussianMixture
 
 
-
-
-
-
+from .support_functions import check_gpu_memory
 
 import copy
 import random
@@ -136,6 +133,8 @@ class MoE_SEED(nn.Module):
 
         # lieber die freeze Funktion nutzen?
         # Freeze the backbone parameters based on names except for the head
+        model = self.backbone
+        model.train()
         for name, param in self.backbone.named_parameters():
             if name in self.backbone_param_names:
                 param.requires_grad = False
@@ -143,21 +142,17 @@ class MoE_SEED(nn.Module):
                 param.requires_grad = True
         for param in self.backbone.head.parameters():
             param.requires_grad = True
-
         # GPU/CPU
-        model = self.backbone
         model.to(self.device)
-
         # Train model on task:
         optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
         for epoch in range(self.train_epochs):
-            model.train()
             running_loss = 0.0
             num_train_loader = len(train_loader)
             for batch_id, (inputs, labels) in enumerate(train_loader):
-                print(f'Epoch: {epoch}, Batch: {batch_id + 1}/{num_train_loader}')
+                #print(f'Epoch: {epoch}, Batch: {batch_id + 1}/{num_train_loader}')
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 outputs = model(inputs)
@@ -165,6 +160,8 @@ class MoE_SEED(nn.Module):
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
+
+
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
 
@@ -190,7 +187,6 @@ class MoE_SEED(nn.Module):
         #print(test_expert_vpt)
         #print("VPT Tokens nachher:")
         #print(self.backbone.vpt_prompt_tokens)
-
 
     def switch_to_expert(self, expert_index):
         # das mit dem head und identity muss ich nochmal testen und gucken obder head name wirklich gelöscht wird, oder ob ic das als eigenen parameter selbst implementieren muss.
