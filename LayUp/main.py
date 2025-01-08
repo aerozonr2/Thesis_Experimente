@@ -6,6 +6,8 @@ import numpy as np
 from tqdm import tqdm
 import functools
 import os
+import cProfile
+
 
 from torch.utils.data import DataLoader
 
@@ -24,6 +26,8 @@ from src.data import (
 )
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
+
+from support_functions import check_gpu_memory, shrink_dataset
 
 
 def set_seed(seed):
@@ -318,20 +322,6 @@ def load_model():
     print(f"Model loaded from {load_path}")
     return model
 
-def shrink_dataset(dataset, fraction=0.025):
-    """
-    Shrinks the dataset to a fraction of its original size.
-    
-    """
-    # Calculate the number of samples to keep
-    num_samples = int(len(dataset) * fraction)
-    
-    # Create a subset of the dataset
-    indices = list(range(num_samples))
-    subset = Subset(dataset, indices)
-    
-    return subset
-
 
 def use_moe(data_manager, train_transform, test_transform, args):
     model = MoE_SEED(args)
@@ -339,22 +329,18 @@ def use_moe(data_manager, train_transform, test_transform, args):
     model.num_classes = data_manager.num_classes
 
 
-    
-    
 
 
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
         
-        #train_dataset.transform = train_transform
-        #test = model.create_distributions(0, train_dataset)
-        #return None
+        train_dataset.transform = train_transform
         print(f"Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
-
+        #return None
         '''
         # Save model incase of crash
         save_path = os.path.join('model_checkpoints', 'model.pth')
@@ -366,11 +352,6 @@ def use_moe(data_manager, train_transform, test_transform, args):
         # Wahrschenlich model.eval() und model.freeze(fully=True)
         # Und natürlich Foward
         try:
-            model.freeze(fully=True) # Funktioniert technisch, freezed aber nicht alles
-            print("model.freeze()")
-        except:
-            print(":(")
-        try:
             model.backbone.eval() # Funktioniert auch
             print("model.backbone.eval()")    
         except:
@@ -381,9 +362,9 @@ def use_moe(data_manager, train_transform, test_transform, args):
 
         # Aus LayUp
         # eval on all tasks up to t
-        eval_res = eval_datamanager(model, data_manager, t, args)
+        #eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
-        Logger.instance().log(eval_res)
+        #Logger.instance().log(eval_res)
 
 
     # Print model summary
@@ -523,6 +504,8 @@ def use_moe(data_manager, train_transform, test_transform, args):
 
 
 def main(args):
+    check_gpu_memory()
+    return None
     # get dataset and augmentations
     train_transform = make_train_transform_from_args(args)
     test_transform = make_test_transform_from_args(args)
@@ -606,7 +589,7 @@ if __name__ == "__main__":
         default="vpt",
         choices=["none", "adapter", "ssf", "vpt"],
     )
-    parser.add_argument("--finetune_epochs", type=int, default=1)
+    parser.add_argument("--finetune_epochs", type=int, default=2)
     parser.add_argument("--k", type=int, default=6)
 
     # misc
@@ -625,6 +608,12 @@ if __name__ == "__main__":
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
     parser.add_argument("--moe_max_experts", type=int, default=2)
     parser.add_argument("--reduce_dataset", default="True")
+    parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
+    parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
+    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="random", choices=["random", "eucld_dist", "kl_div", "ws_div"])
+    parser.add_argument('--moe_train_epochs', help='Num training epochs for expert initialisation', default=2)
+    parser.add_argument('--moe_finetune_epochs', help='Num finetune epochs for expert finetuning', default=2)
+
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -647,3 +636,5 @@ if __name__ == "__main__":
     setup_logger(args)
 
     main(args)
+    # cProfile.run('main(args)', 'cProfile/profile_output.prof')
+    # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen

@@ -5,3 +5,7 @@
 **/__pycache__
 *.log
 **/wandb/
+/LayUp/wandb/
+/LayUp/cProfile/
+/LayUp/src/__pycache__/
+/.venv/
