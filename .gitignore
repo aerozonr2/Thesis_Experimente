@@ -1,11 +1,8 @@
 *.pth
-/local_data/
-/LayUp/local_data/
-.venv/
-**/__pycache__
 *.log
+**/local_data
+**/__pycache__
 **/wandb/
-/LayUp/wandb/
 /LayUp/cProfile/
-/LayUp/src/__pycache__/
-/.venv/
+.venv/
+
