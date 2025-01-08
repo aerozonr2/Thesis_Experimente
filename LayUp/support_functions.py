@@ -33,3 +33,36 @@ def shrink_dataset(dataset, fraction=0.25):
     subset = Subset(dataset, indices)
     
     return subset
+
+def check_gpu_memory():
+    if torch.cuda.is_available():
+        gpu_id = torch.cuda.current_device()
+        print(f"GPU Name: {torch.cuda.get_device_name(gpu_id)}")
+        print(f"Memory Allocated: {torch.cuda.memory_allocated(gpu_id) / 1e6:.2f} MB")
+        print(f"Memory Cached: {torch.cuda.memory_reserved(gpu_id) / 1e6:.2f} MB")
+        print(f"Max Memory Allocated: {torch.cuda.max_memory_allocated(gpu_id) / 1e6:.2f} MB")
+        print(f"Max Memory Cached: {torch.cuda.max_memory_reserved(gpu_id) / 1e6:.2f} MB")
+    else:
+        print("CUDA is not available. Check your GPU setup.")
+
+def move_large_tensor_to_gpu():
+    # Check if CUDA is available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Create a larger tensor (e.g., 1000x1000)
+    tensor = torch.randn(1000, 1000)  # Example tensor of shape (1000, 1000)
+    
+    # Move the tensor to the GPU (or keep it on CPU if CUDA is unavailable)
+    tensor = tensor.to(device)
+    check_gpu_memory()
+
+    
+    # Print the tensor's shape and its device
+    print(f"Tensor shape: {tensor.shape}")
+    print(f"Tensor is on device: {tensor.device}")
+
+if __name__ == "__main__":
+    check_gpu_memory()
+    move_large_tensor_to_gpu()
+    print("---")
+    check_gpu_memory()
