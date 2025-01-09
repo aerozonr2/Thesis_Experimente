@@ -53,6 +53,7 @@ class MoE_SEED(nn.Module):
         self.gmms = args.gmms
         self.use_multivariate = args.use_multivariate
         self.selection_method = args.selection_method
+        self.empty_expert = {}
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -119,22 +120,35 @@ class MoE_SEED(nn.Module):
                 param.requires_grad = True
 
     def train_expert(self, train_dataset=None):
-        self.add_expert()
+        # initialise expert from empty_expert
+        # now it should start everytime wich an empty expert
+        for name, param in self.backbone.named_parameters():
+            if name in self.empty_expert:
+                param.data.copy_(self.empty_expert[name])
 
-        # Warum verändern sich die Tokens so wenig und warum sind die Zahken alle gleich?
+        weights_tensor = self.backbone.vpt_prompt_tokens.data
+        num_zeros = torch.sum(weights_tensor == 0).item()
+        num_non_zeros = torch.sum(weights_tensor != 0).item()
+        print(f"Number of weights that are 0: {num_zeros}")
+        print(f"Number of weights that are not 0: {num_non_zeros}")
+        print("------" * 10)
+
+        # Warum verändern sich die Tokens so wenig und warum sind die Zahken alle gleich? -> Implementationsfehler in LayUp, FSA trainiert allerdings die letzten Parameter, genauso wie ich
         #test_expert_vpt = self.backbone.vpt_prompt_tokens.clone().detach()
-        # will ich beim training einen Learning Rate Scheduler? SEED hat einen.
-        # Welchen loss soll ich nehmen? LayUp oder SEED?
+        # will ich beim training einen Learning Rate Scheduler? SEED hat einen. -> Finetuning am Ende
+        # Welchen loss soll ich nehmen? LayUp oder SEED? -> Finetuning am Ende
 
         # Add a linear head at the end of the network
         num_features = self.backbone.num_features
         num_classes = self.num_classes
         self.backbone.head = nn.Linear(num_features, num_classes)
 
-        # lieber die freeze Funktion nutzen?
         # Freeze the backbone parameters based on names except for the head
+        self.freeze_ViT_unfreeze_PEFT()
         model = self.backbone
         model.train()
+        # Habe stattdessen die Funktion benutzts
+        """
         for name, param in self.backbone.named_parameters():
             if name in self.backbone_param_names:
                 param.requires_grad = False
@@ -142,6 +156,7 @@ class MoE_SEED(nn.Module):
                 param.requires_grad = True
         for param in self.backbone.head.parameters():
             param.requires_grad = True
+        """
         # GPU/CPU
         model.to(self.device)
         # Train model on task:
@@ -164,7 +179,6 @@ class MoE_SEED(nn.Module):
 
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
-
 
         # Save Expert parameters
         expert_parameters = {}
@@ -269,15 +283,11 @@ class MoE_SEED(nn.Module):
         expert_to_finetune = torch.argmax(expert_overlap)
         return int(expert_to_finetune)
 
-    def selection_ws_divergence(self, t, train_dataset):
+    def selection_ws_divergence(self, t):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
         pass
 
     def finetune_expert(self, t, expert_index, train_dataset):
-        # Was ist mit dem Head? Muss ich beim tauschen der heads mehr copy.deepcopy machen?
-        # muss ich die Worker der DataLoader löschen oder die dataloader von memory befreien?
-        # generell mit model = self.backbone. Wann das ein Pointer? und wann muss ich das kopieren?
-        # Der als modul muss irgendwie da bleiben
         print(f"Finetuning expert {expert_index} on task {t}:")
         self.switch_to_expert(expert_index)
         old_model = copy.deepcopy(self.backbone)
@@ -292,8 +302,7 @@ class MoE_SEED(nn.Module):
         model = self.freeze_ViT_unfreeze_PEFT()
         model.to(self.device)
 
-        # Train model on task:
-        # muss als Funktion implementiert werden, weil ich das mehrmals brauche (training, fintuning)
+        # Finetune model on task:
         optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.moe_finetune_epochs):
@@ -326,24 +335,13 @@ class MoE_SEED(nn.Module):
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
             if name not in self.backbone_param_names:
-                expert_parameters[name] = param # .clone() funktioniert nicht
+                expert_parameters[name] = param 
             elif name == 'head.weight' or name == 'head.bias':
                 expert_parameters[name] = param
             else:
                 pass # Not saving backbone parameters except for the head
         self.experts[expert_index] = copy.deepcopy(expert_parameters)
-        
 
-        # Validation while training?!
-        # Generell wandb anschließen
-        # Welche Metriken will ich speichern?
-
-
-        #print("VPT Tokens vorher:")
-        #print(test_expert_vpt)
-        #print("VPT Tokens nachher:")
-        #print(self.backbone.vpt_prompt_tokens)
-    
     @torch.no_grad()
     def create_distributions(self, t, train_dataset):
         """ Create distributions for task t"""
@@ -447,7 +445,6 @@ class MoE_SEED(nn.Module):
         return ce_loss
     
     def _get_optimizer(self, num, wd, milestones=[60, 120, 160]):
-        # unnötig?!
         pass
 '''
     def freeze(self, fully=False):

@@ -8,12 +8,6 @@ print(torch.__version__)
 print(torch.__config__.show())
 print(torch.cuda.is_available())
 '''
-def load_model():
-    model = MoE_SEED(args)
-    load_path = os.path.join('', 'model.pth')
-    model.backbone.load_state_dict(torch.load(load_path))
-    print(f"Model loaded from {load_path}")
-    return model
 
 def display_profile(file_path="cProfile/profile_output.prof", sort_by="cumulative", lines=10):
     """
@@ -81,4 +75,4 @@ def move_large_tensor_to_gpu():
     print(f"Tensor is on device: {tensor.device}")
 
 if __name__ == "__main__":
-    display_profile()
+    pass

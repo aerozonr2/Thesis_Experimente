@@ -7,6 +7,8 @@ from tqdm import tqdm
 import functools
 import os
 import cProfile
+import copy
+
 
 import wandb
 
@@ -28,7 +30,7 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
-from src.support_functions import check_gpu_memory, shrink_dataset, load_model
+from src.support_functions import check_gpu_memory, shrink_dataset
 
 
 def set_seed(seed):
@@ -227,12 +229,15 @@ def use_layup(data_manager, train_transform, test_transform, args):
         num_classes=data_manager.num_classes,
     )
     model.to(args.device)
-
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
         print(f"Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
 
+        # first session adaptation
+        if t == 0 and args.finetune_method != "none":
+            train_dataset.transform = train_transform
+            fsa(model, train_dataset, test_datatset, args)
 
         model.freeze(fully=True)
         model.eval()
@@ -249,14 +254,12 @@ def use_layup(data_manager, train_transform, test_transform, args):
                 pin_memory=True,
             )
         )
-
+        
         # eval on all tasks up to t
         eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
         Logger.instance().log(eval_res)
-
-
-
+    # Print model summary
     """
     Print an organized summary of the important parts of a Vision Transformer.
     Includes patch embedding, transformer blocks, classification head,
@@ -322,20 +325,20 @@ def use_moe(data_manager, train_transform, test_transform, args):
     model = MoE_SEED(args)
     model.save_backbone_param_names()
     model.num_classes = data_manager.num_classes
-
-
+    model.add_expert()
+    for module_name in model.backbone.state_dict():
+        if module_name not in model.backbone_param_names:
+            model.empty_expert[module_name] = copy.deepcopy(model.backbone.state_dict()[module_name])
 
 
     # Trainloop for all tasks
-    for t, (train_dataset, test_datatset) in enumerate(data_manager):
-        
+    for t, (train_dataset, test_datatset) in enumerate(data_manager): 
         train_dataset.transform = train_transform
         print(f"Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
-        #return None
         '''
         # Save model incase of crash
         save_path = os.path.join('model_checkpoints', 'model.pth')
@@ -346,13 +349,14 @@ def use_moe(data_manager, train_transform, test_transform, args):
         # Freeze Model. kommt drauf an welche methoden ich in der Evaluation aus LayUp brauche
         # Wahrschenlich model.eval() und model.freeze(fully=True)
         # Und natürlich Foward
+        """
         try:
             model.backbone.eval() # Funktioniert auch
             print("model.backbone.eval()")    
         except:
             model.eval()
             print("model.eval()") 
-
+        """
 
 
         # Aus LayUp
@@ -362,66 +366,36 @@ def use_moe(data_manager, train_transform, test_transform, args):
         #Logger.instance().log(eval_res)
 
 
+
     # Print model summary
+    
+    # VPT                                                           !!!!!!!!! VPT
     """
-    print("Model Summary:")
-
-    print("Vision Transformer Summary:")
-    print("=" * 40)
-    
-    # Patch embedding layer
-    print("Patch Embedding Layer:")
-    print(model.backbone.patch_embed)
-    print("-" * 40)
-    
-    # Transformer blocks
-    print("Transformer Blocks:")
-    for i, block in enumerate(model.backbone.blocks):
-        print(f"Block {i + 1}:")
-        print(f"  Attention: {block.attn}")
-        print(f"  MLP: {block.mlp}")
-        
-        # Extract activation functions in the MLP
-        activation_functions = [
-            layer.__class__.__name__ for layer in block.mlp.fc2.children() 
-            if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
-        ]
-        if not activation_functions:  # If no activations are direct children, check deeper
-            activation_functions = [
-                layer.__class__.__name__ for layer in block.mlp.children()
-                if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
-            ]
-        print(f"  Activation Functions: {', '.join(activation_functions) if activation_functions else 'None Found'}")
-    print("-" * 40)
-    
-    # Classification head
-    print("Classification Head:")
-    print(model.backbone.head)
-    print("-" * 40)
-    
-    # Parameters summary
-    print("Parameters Summary:")
-    for name, param in model.backbone.named_parameters():
-        print(f"{name}: {param.shape}")
-    print("-" * 40)
-    
-    # Activation functions
-    print("Activation Functions:")
-    activations = []
-    def find_activation_functions(module, activations):
-        for child in module.children():
-            if isinstance(child, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh)):
-                activations.append(child.__class__.__name__)
-            else:
-                find_activation_functions(child, activations)
-        return activations
-    
-    activations = find_activation_functions(model.backbone, activations)
-    print(", ".join(set(activations)))
-    print("=" * 40)
+    print(model.backbone.vpt_prompt_tokens) #                            
+    weights_tensor = model.backbone.vpt_prompt_tokens.data
+    # Count the number of weights that are 0
+    num_zeros = torch.sum(weights_tensor == 0).item()
+    # Count the number of weights that are not 0
+    num_non_zeros = torch.sum(weights_tensor != 0).item()
+    print(f"Number of weights that are 0: {num_zeros}")
+    print(f"Number of weights that are not 0: {num_non_zeros}")
     """
-    
+    # Adapter                                                           !!!!!!!!! Adapter                                   
+    """
+    same_weights = torch.equal(test_adapter_weights, model.backbone.blocks[0].adaptmlp.down_proj.weight)
+    print(f"Initial weights and modified weights are the same: {same_weights}")
+    same_bias = torch.equal(test_adapter_bias, model.backbone.blocks[0].adaptmlp.down_proj.bias)
+    print(f"Initial bias and modified bias are the same: {same_bias}")
+    """
+    # SSF                                                           !!!!!!!!! SSF
+    """
+    same_scale = torch.equal(test_ssf_scale, model.backbone.blocks[0].mlp.fc1_scale)
+    print(f"Initial scale and modified scale are the same: {same_scale}")
+    same_shift = torch.equal(test_ssf_shift, model.backbone.blocks[0].mlp.fc1_shift)
+    print(f"Initial shift and modified shift are the same: {same_shift}")
+    """
 
+    # Alt:
     # VPT Experts
     '''
     model = MoE_SEED(args)
@@ -598,7 +572,7 @@ if __name__ == "__main__":
 
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
-    parser.add_argument("--moe_max_experts", type=int, default=2)
+    parser.add_argument("--moe_max_experts", type=int, default=3)
     parser.add_argument("--reduce_dataset", default="True")
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
@@ -628,9 +602,6 @@ if __name__ == "__main__":
     setup_logger(args)
 
 
-    try:
-        cProfile.run('main(args)', 'cProfile/profile_output.prof')
-        # main(args)
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    #cProfile.run('main(args)', 'cProfile/profile_output.prof')
+    main(args)
     # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen ?
