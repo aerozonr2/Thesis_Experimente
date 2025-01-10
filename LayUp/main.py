@@ -265,6 +265,7 @@ def use_layup(data_manager, train_transform, test_transform, args):
     Includes patch embedding, transformer blocks, classification head,
     parameters, and activation functions.
     """
+    '''
     print("Vision Transformer Summary:")
     print("=" * 40)
     
@@ -318,6 +319,7 @@ def use_layup(data_manager, train_transform, test_transform, args):
     activations = find_activation_functions(model)
     print(", ".join(set(activations)))
     print("=" * 40)
+    '''
 
 
 
@@ -326,11 +328,10 @@ def use_moe(data_manager, train_transform, test_transform, args):
     model.save_backbone_param_names()
     model.num_classes = data_manager.num_classes
     model.add_expert()
-    for module_name in model.backbone.state_dict():
-        if module_name not in model.backbone_param_names:
-            model.empty_expert[module_name] = copy.deepcopy(model.backbone.state_dict()[module_name])
-
-
+    for param_name, _ in model.backbone.named_parameters():
+        if param_name not in model.backbone_param_names:
+            model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
+    
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
         train_dataset.transform = train_transform
@@ -339,31 +340,14 @@ def use_moe(data_manager, train_transform, test_transform, args):
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
-        '''
-        # Save model incase of crash
-        save_path = os.path.join('model_checkpoints', 'model.pth')
-        torch.save(model.backbone.state_dict(), save_path)
-        print(f"Model saved to {save_path}")
-        '''
-
-        # Freeze Model. kommt drauf an welche methoden ich in der Evaluation aus LayUp brauche
-        # Wahrschenlich model.eval() und model.freeze(fully=True)
-        # Und natürlich Foward
-        """
-        try:
-            model.backbone.eval() # Funktioniert auch
-            print("model.backbone.eval()")    
-        except:
-            model.eval()
-            print("model.eval()") 
-        """
-
-
-        # Aus LayUp
+        
         # eval on all tasks up to t
-        #eval_res = eval_datamanager(model, data_manager, t, args)
+        model.eval()
+        model.freeze(fully=True)
+        eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
-        #Logger.instance().log(eval_res)
+        print(eval_res)
+        Logger.instance().log(eval_res)
 
 
 

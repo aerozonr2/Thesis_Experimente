@@ -38,7 +38,8 @@ class MoE_SEED(nn.Module):
         self.backbone = timm.create_model(args.backbone, pretrained=True)
         self.finetune_method = args.finetune_method
         self.max_experts = args.moe_max_experts
-        self.experts = [] 
+        self.experts = []
+        self.expert_heads = []
         self.experts_distributions = []
         self.device = args.device
         self.lr = args.lr
@@ -121,23 +122,20 @@ class MoE_SEED(nn.Module):
 
     def train_expert(self, train_dataset=None):
         # initialise expert from empty_expert
-        # now it should start everytime wich an empty expert
         for name, param in self.backbone.named_parameters():
             if name in self.empty_expert:
                 param.data.copy_(self.empty_expert[name])
-
+        '''
         weights_tensor = self.backbone.vpt_prompt_tokens.data
         num_zeros = torch.sum(weights_tensor == 0).item()
         num_non_zeros = torch.sum(weights_tensor != 0).item()
-        print(f"Number of weights that are 0: {num_zeros}")
-        print(f"Number of weights that are not 0: {num_non_zeros}")
-        print("------" * 10)
+        #print(f"Number of weights that are 0: {num_zeros}")
+        #print(f"Number of weights that are not 0: {num_non_zeros}")
+        #print("------" * 10)
 
         # Warum verändern sich die Tokens so wenig und warum sind die Zahken alle gleich? -> Implementationsfehler in LayUp, FSA trainiert allerdings die letzten Parameter, genauso wie ich
         #test_expert_vpt = self.backbone.vpt_prompt_tokens.clone().detach()
-        # will ich beim training einen Learning Rate Scheduler? SEED hat einen. -> Finetuning am Ende
-        # Welchen loss soll ich nehmen? LayUp oder SEED? -> Finetuning am Ende
-
+        '''
         # Add a linear head at the end of the network
         num_features = self.backbone.num_features
         num_classes = self.num_classes
@@ -145,22 +143,15 @@ class MoE_SEED(nn.Module):
 
         # Freeze the backbone parameters based on names except for the head
         self.freeze_ViT_unfreeze_PEFT()
+
         model = self.backbone
         model.train()
-        # Habe stattdessen die Funktion benutzts
-        """
-        for name, param in self.backbone.named_parameters():
-            if name in self.backbone_param_names:
-                param.requires_grad = False
-            else:
-                param.requires_grad = True
-        for param in self.backbone.head.parameters():
-            param.requires_grad = True
-        """
+
         # GPU/CPU
         model.to(self.device)
         # Train model on task:
-        optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
+        optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
+
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
         for epoch in range(self.train_epochs):
@@ -184,17 +175,12 @@ class MoE_SEED(nn.Module):
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
             if name not in self.backbone_param_names:
-                expert_parameters[name] = param # .clone() funktioniert nicht
-            elif name == 'head.weight' or name == 'head.bias':
-                expert_parameters[name] = param
+                expert_parameters[name] = copy.deepcopy(param) 
             else:
-                pass # Not saving backbone parameters except for the head
+                pass # Not saving backbone parameters
         self.experts.append(copy.deepcopy(expert_parameters))
+        self.expert_heads.append(copy.deepcopy(self.backbone.head.state_dict()))
         
-
-        # Validation while training?!
-        # Generell wandb anschließen
-
         
         # könnte man auch in einer WandB Metrik verpacken
         #print("VPT Tokens vorher:")
@@ -205,14 +191,10 @@ class MoE_SEED(nn.Module):
     def switch_to_expert(self, expert_index):
         # das mit dem head und identity muss ich nochmal testen und gucken obder head name wirklich gelöscht wird, oder ob ic das als eigenen parameter selbst implementieren muss.
         for name, param in self.experts[expert_index].items():
-            if name == 'head.weight' or name == 'head.bias':
-                try:
-                    self.backbone.state_dict()[name].copy_(param)
-                except:
-                    print(f"Could not copy {name}")
-            else:
                 self.backbone.state_dict()[name].copy_(param)
+        self.backbone.head.load_state_dict(self.expert_heads[expert_index])
 
+    @torch.no_grad()
     def forward(self, x):
         features = []
         for expert_index in range(len(self.experts)):
@@ -303,7 +285,8 @@ class MoE_SEED(nn.Module):
         model.to(self.device)
 
         # Finetune model on task:
-        optimizer = torch.optim.SGD(model.parameters(), lr=self.lr)
+        optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
+        
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.moe_finetune_epochs):
             model.train()
@@ -331,17 +314,16 @@ class MoE_SEED(nn.Module):
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
 
 
-        # Save Expert parameters
+                # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
             if name not in self.backbone_param_names:
-                expert_parameters[name] = param 
-            elif name == 'head.weight' or name == 'head.bias':
-                expert_parameters[name] = param
+                expert_parameters[name] = copy.deepcopy(param) 
             else:
-                pass # Not saving backbone parameters except for the head
-        self.experts[expert_index] = copy.deepcopy(expert_parameters)
-
+                pass # Not saving backbone parameters
+        self.experts[expert_index](copy.deepcopy(expert_parameters))
+        self.expert_heads[expert_index](copy.deepcopy(self.backbone.head.state_dict()))
+        
     @torch.no_grad()
     def create_distributions(self, t, train_dataset):
         """ Create distributions for task t"""
@@ -443,12 +425,13 @@ class MoE_SEED(nn.Module):
             total_loss = (1 - self.alpha) * ce_loss + self.alpha * kd_loss
             return total_loss
         return ce_loss
-    
-    def _get_optimizer(self, num, wd, milestones=[60, 120, 160]):
-        pass
-'''
+
     def freeze(self, fully=False):
-        # Haben die einzelnen Blöcke eine Freeze Funktion?
-        # NO !!
+        # Requires_grad = False for all PEFT parameters
         call_in_all_submodules(self.backbone, "freeze", fully=fully)
-'''    
+
+    def get_optimizer(self, num_param, milestones=[60, 120, 160]):
+            """Returns the optimizer"""
+            optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9) # weight_decay=wd?
+            scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
+            return optimizer, scheduler
