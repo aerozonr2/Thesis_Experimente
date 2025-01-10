@@ -8,7 +8,7 @@ import functools
 import os
 import cProfile
 import copy
-
+import time
 
 import wandb
 
@@ -212,7 +212,17 @@ def eval_dataset(model, dataset, args):
 
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
-
+    #
+    """
+    print(predictions)
+    print(f"len: {len(predictions)}")
+    print("-----------------")
+    for i in predictions:
+        print(i)
+        print(i.shape)
+        print("---")
+    """
+    #
     predictions = np.concatenate(predictions, axis=0)
     labels = np.concatenate(labels, axis=0)
 
@@ -228,6 +238,7 @@ def use_layup(data_manager, train_transform, test_transform, args):
         intralayers=args.intralayers,
         num_classes=data_manager.num_classes,
     )
+
     model.to(args.device)
     for t, (train_dataset, test_datatset) in enumerate(data_manager):
         print(f"Task {t}")
@@ -259,16 +270,16 @@ def use_layup(data_manager, train_transform, test_transform, args):
         eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
         Logger.instance().log(eval_res)
+
     # Print model summary
     """
     Print an organized summary of the important parts of a Vision Transformer.
     Includes patch embedding, transformer blocks, classification head,
     parameters, and activation functions.
     """
-    '''
     print("Vision Transformer Summary:")
     print("=" * 40)
-    
+    '''
     # Patch embedding layer
     print("Patch Embedding Layer:")
     print(model.patch_embed)
@@ -340,15 +351,13 @@ def use_moe(data_manager, train_transform, test_transform, args):
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
-        
+
         # eval on all tasks up to t
         model.eval()
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
-        print(eval_res)
         Logger.instance().log(eval_res)
-
 
 
     # Print model summary
@@ -561,9 +570,6 @@ if __name__ == "__main__":
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="random", choices=["random", "eucld_dist", "kl_div", "ws_div"])
-    parser.add_argument('--moe_train_epochs', type=int, help='Num training epochs for expert initialisation', default=2)
-    parser.add_argument('--moe_finetune_epochs', type=int, help='Num finetune epochs for expert finetuning', default=2)
-
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
