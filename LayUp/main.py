@@ -212,20 +212,13 @@ def eval_dataset(model, dataset, args):
 
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
-    #
-    """
-    print(predictions)
-    print(f"len: {len(predictions)}")
-    print("-----------------")
-    for i in predictions:
-        print(i)
-        print(i.shape)
-        print("---")
-    """
-    #
+    
+    
+    # Some batches have only one image wich causes a wrong shape
+    predictions = [np.expand_dims(pred, axis=0) if pred.ndim == 1 else pred for pred in predictions]
+
     predictions = np.concatenate(predictions, axis=0)
     labels = np.concatenate(labels, axis=0)
-
     acc = (predictions.argmax(1) == labels).mean().item()
 
     return {"acc": acc}
@@ -351,6 +344,7 @@ def use_moe(data_manager, train_transform, test_transform, args):
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
+        
 
         # eval on all tasks up to t
         model.eval()
@@ -358,6 +352,15 @@ def use_moe(data_manager, train_transform, test_transform, args):
         eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
         Logger.instance().log(eval_res)
+
+
+        # VPT ist Deep wegen den 12 Layern, Es wird aber nur das erste benutzt. 12 Layer x 10 vpt_prompt_token_num x 768 embed_dim = VTP Tokens
+        # ein experte so viel wie fsa benutzt 10 tokens, nicht 5, wie Kyra das meinte
+        # Ich mache jetzt vpt_type="shallow", dadurch fällt der overhead weg, weil nur ein layer benutzt wird
+        # Trotzdem ist der Experte immer noch doppelt so groß, 10 statt 5 tokens?
+        #  .yml config mit hydra (module)
+        # bayes optim für hyperparameter
+        # gridsearch für alles andere
 
 
     # Print model summary
@@ -387,81 +390,6 @@ def use_moe(data_manager, train_transform, test_transform, args):
     same_shift = torch.equal(test_ssf_shift, model.backbone.blocks[0].mlp.fc1_shift)
     print(f"Initial shift and modified shift are the same: {same_shift}")
     """
-
-    # Alt:
-    # VPT Experts
-    '''
-    model = MoE_SEED(args)
-    # Only change are addition of vprompt tokens at the beginning
-    print("-----------------")
-    model = model.train_expert()
-    print(model.vpt_prompt_tokens)
-
-    print("--------change module at the end to identity--------")
-    test_expert_vpt = model.vpt_prompt_tokens.clone().detach()
-    with torch.no_grad():
-        model.vpt_prompt_tokens.fill_(1.0)
-    print(model.vpt_prompt_tokens)
-
-    print("--------change module back to original--------")
-    with torch.no_grad():
-        model.vpt_prompt_tokens.copy_(test_expert_vpt)
-    print(model.vpt_prompt_tokens)
-    '''
-
-    # Adapter Experts
-    '''
-    model = MoE_SEED(args)
-    for name, module in model.backbone.blocks[0].named_children():
-        print(f"{name}: {module}")
-
-    print("-----------------")
-
-    model = model.train_expert()
-    for name, module in model.blocks[0].named_children():
-        print(f"{name}: {module}")
-
-    print("--------change module at the end to identity--------")
-    test_expert_adaptmlp = model.blocks[0].adaptmlp
-    model.blocks[0].adaptmlp = nn.Identity()
-    for name, module in model.blocks[0].named_children():
-        print(f"{name}: {module}")
-    
-    print("--------change module back to original--------")
-    model.blocks[0].adaptmlp = test_expert_adaptmlp
-    for name, module in model.blocks[0].named_children():
-        print(f"{name}: {module}")
-    '''
-
-    # SSF Experts
-    '''
-    model = MoE_SEED(args)
-    for name, param in model.backbone.blocks[0].named_children():
-        print(f"Parameter name: {name}, Shape: {param}")
-
-    print("-----------------")
-    model = model.train_expert()
-    for name, param in model.blocks[0].named_children():
-        print(f"Parameter name: {name}, Shape: {param}")
-
-    print("--------mlp layers at the end--------")
-    test_expert_scale_layer = model.blocks[0].mlp.fc1_scale
-    test_expert_shift_layer = model.blocks[0].mlp.fc1_shift
-    print(model.blocks[0].mlp.fc1_scale)
-    print(model.blocks[0].mlp.fc1_shift)
-
-    print("--------replacement of layer with ones--------")
-    model.blocks[0].mlp.fc1_scale = torch.nn.Parameter(torch.ones_like(model.blocks[0].mlp.fc1_scale))
-    model.blocks[0].mlp.fc1_shift = torch.nn.Parameter(torch.ones_like(model.blocks[0].mlp.fc1_scale))
-    print(model.blocks[0].mlp.fc1_scale)
-    print(model.blocks[0].mlp.fc1_shift)
-
-    print("--------replacement of layer with original--------")
-    model.blocks[0].mlp.fc1_scale = test_expert_scale_layer
-    model.blocks[0].mlp.fc1_shift = test_expert_shift_layer
-    print(model.blocks[0].mlp.fc1_scale)
-    print(model.blocks[0].mlp.fc1_shift)
-    '''
 
 
 
@@ -524,7 +452,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # training
-    parser.add_argument("--batch_size", type=int, default=48)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.003)
     parser.add_argument("--weight_decay", type=float, default=0.0005)
     parser.add_argument("--early_stopping", type=int, default=5)
@@ -548,7 +476,7 @@ if __name__ == "__main__":
         default="vpt",
         choices=["none", "adapter", "ssf", "vpt"],
     )
-    parser.add_argument("--finetune_epochs", type=int, default=2)
+    parser.add_argument("--finetune_epochs", type=int, default=1)
     parser.add_argument("--k", type=int, default=6)
 
     # misc
@@ -565,7 +493,7 @@ if __name__ == "__main__":
 
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
-    parser.add_argument("--moe_max_experts", type=int, default=3)
+    parser.add_argument("--moe_max_experts", type=int, default=2)
     parser.add_argument("--reduce_dataset", default="True")
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)

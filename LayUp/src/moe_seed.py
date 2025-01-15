@@ -17,6 +17,8 @@ import random
 import torch
 from tqdm import tqdm
 
+import numpy as np
+
 from argparse import ArgumentParser
 from itertools import compress
 from torch import nn
@@ -69,7 +71,7 @@ class MoE_SEED(nn.Module):
         if self.finetune_method == 'ssf':
             self.backbone = add_ssf(self.backbone)
         elif self.finetune_method == 'vpt': 
-            self.backbone = add_vpt(self.backbone)
+            self.backbone = add_vpt(self.backbone, vpt_type="shallow")
         elif self.finetune_method == 'adapter':
             self.backbone = add_adapters(self.backbone)
         else: 
@@ -77,6 +79,7 @@ class MoE_SEED(nn.Module):
 
     def train_loop(self, t, train_dataset):
         self.taskcla.append([])
+        choosen_expert_index = t
         if t < self.max_experts:
             print(f"Training expert {t} on task {t}:")
             self.experts_distributions.append([])
@@ -84,9 +87,11 @@ class MoE_SEED(nn.Module):
         else:
             expert_index = self.choose_expert_to_finetune(t, train_dataset)
             print(f"Finetuning expert {expert_index} on task {t}:")
-            self.finetune_expert(t, expert_index, train_dataset)
-        #self.create_distributions(t, train_dataset) ## test
-        #return None ## Test  
+            self.finetune_expert(t, expert_index, train_dataset) 
+            choosen_expert_index = expert_index
+        
+        #self.create_distributions(train_dataset=train_dataset, exp_index=choosen_expert_index)
+                
         '''
         if t >= self.max_experts:
             expert_to_finetune = self.choose_expert_to_finetune(t, train_dataset)
@@ -179,7 +184,10 @@ class MoE_SEED(nn.Module):
         # das mit dem head und identity muss ich nochmal testen und gucken obder head name wirklich gelöscht wird, oder ob ic das als eigenen parameter selbst implementieren muss.
         for name, param in self.experts[expert_index].items():
                 self.backbone.state_dict()[name].copy_(param)
+        if isinstance(self.backbone.head, nn.Identity):
+            self.backbone.head = nn.Linear(self.backbone.num_features, self.num_classes)
         self.backbone.head.load_state_dict(self.expert_heads[expert_index])
+        self.backbone.head.to(self.device)
 
     @torch.no_grad()
     def forward(self, x):
@@ -210,11 +218,10 @@ class MoE_SEED(nn.Module):
     
     @torch.no_grad()
     def choose_expert_to_finetune(self, t, train_dataset):
-        #self.create_distributions(t, train_dataset)
         if self.selection_method == 'random':
             return self.selection_random()
         elif self.selection_method == 'eucld_dist':
-            return self.selection_euclidean_distance(t, train_dataset)
+            return self.selection_euclidean_distance(train_dataset)
         elif self.selection_method == 'kl_div':
             return self.selection_kl_divergence(t, train_dataset)
         elif self.selection_method == 'ws_div':
@@ -226,16 +233,45 @@ class MoE_SEED(nn.Module):
         # Randomly choose an expert to finetune
         return random.randint(0, self.max_experts - 1)
     
-    def selection_euclidean_distance(self, t):
+    def selection_euclidean_distance(self, train_dataset):
         # Euclidean distance between the current task distribution and the distributions of the experts
         pass
     
-    def selection_kl_divergence(self, t):
+    @torch.no_grad()
+    def selection_kl_divergence(self, t, train_dataset):
         # KL divergence between the current task distribution and the distributions of the experts
+        self.create_distributions(t, train_dataset)
+        print("Calculating KL Divergence")
+
+            # Debug prints
+        print(f"t: {t}")
+        print(f"self.taskcla: {self.taskcla}")
+        print(f"len(self.taskcla): {len(self.taskcla)}")
+        
+        if t >= len(self.taskcla):
+            raise IndexError(f"Index t={t} is out of range for self.taskcla with length {len(self.taskcla)}")
+        
+        expert_overlap = torch.zeros(self.max_experts, device=self.device)
+        for expert_index in range(self.max_experts):
+            classes_in_t = self.taskcla[t][1]
+            new_distributions = self.experts_distributions[expert_index][-classes_in_t:]
+            kl_matrix = torch.zeros((len(new_distributions), len(new_distributions)), device=self.device)
+            for o, old_gauss_ in enumerate(new_distributions):
+                old_gauss = MultivariateNormal(old_gauss_.mu.data[0][0], covariance_matrix=old_gauss_.var.data[0][0])
+                for n, new_gauss_ in enumerate(new_distributions):
+                    new_gauss = MultivariateNormal(new_gauss_.mu.data[0][0], covariance_matrix=new_gauss_.var.data[0][0])
+                    kl_matrix[n, o] = torch.distributions.kl_divergence(new_gauss, old_gauss)
+            expert_overlap[expert_index] = torch.mean(kl_matrix)
+            self.experts_distributions[expert_index] = self.experts_distributions[expert_index][:-classes_in_t]
+        print(f"Expert overlap: {expert_overlap}")
+        expert_to_finetune = torch.argmax(expert_overlap)
+        self.taskcla = self.taskcla[:-1]
+        return int(expert_to_finetune)
+        """
         expert_overlap = torch.zeros(self.max_experts, device=self.device)
         for expert_index in range(self.max_experts):
             self.switch_to_expert(expert_index)
-            expert_overlap[expert_index] = self.calculate_kl_divergences(t, expert_index)
+            #expert_overlap[expert_index] = self.calculate_kl_divergences(t, expert_index)
             new_distributions = self.experts_distributions[expert_index]
             kl_matrix = torch.zeros((len(new_distributions), len(new_distributions)), device=self.device)
             
@@ -250,6 +286,7 @@ class MoE_SEED(nn.Module):
 
         expert_to_finetune = torch.argmax(expert_overlap)
         return int(expert_to_finetune)
+        """
 
     def selection_ws_divergence(self, t):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
@@ -310,26 +347,31 @@ class MoE_SEED(nn.Module):
         self.expert_heads[expert_index] = copy.deepcopy(self.backbone.head.state_dict())
         
     @torch.no_grad()
-    def create_distributions(self, t, train_dataset):
-        """ Create distributions for task t"""
-        sorting_dataloader = DataLoader(
-            train_dataset,
-            batch_size=64,
-            shuffle=False,
-            num_workers=2,
-            pin_memory=False
-        )
-
+    def create_distributions(self, train_dataset, exp_index):
+        """ 
+        Create distributions for task t.
+        One distribution for each class.
+        The distributions are stored in self.experts_distributions[expert_index],
+        but only for the expert who leared the Task
+        """
         # Collect all images and labels needs much time
         all_images = []
         all_labels = []
         # Iterate over the DataLoader to collect images and labels
-        for images, labels in sorting_dataloader:
-            all_images.append(images)
-            all_labels.append(labels)
-        # Concatenate all batches into a single tensor
-        all_images = torch.cat(all_images)
-        all_labels = torch.cat(all_labels)
+        for image, label in train_dataset:
+            all_images.append(image)
+            all_labels.append(label)
+
+        # Convert into tensors
+        all_images = torch.stack(all_images)
+        all_labels = torch.tensor(all_labels)
+
+        # Get expert
+        self.switch_to_expert(exp_index)
+        model = self.backbone
+        model.head = nn.Identity()
+        model.eval()
+        model.to(self.device)
 
         # Iterate over each class
         unique_labels = all_labels.unique()
@@ -340,55 +382,43 @@ class MoE_SEED(nn.Module):
 
             class_loader = DataLoader(
                 class_images,
-                batch_size=64,
+                batch_size=self.batch_size,
                 shuffle=False,
                 num_workers=2,
                 pin_memory=True
             )
 
-            # iterate over all experts
-            num_loops = min(self.max_experts, t+1)
-            print(num_loops)
-            for expert_index in range(num_loops):
-                print(expert_index)
-                self.switch_to_expert(expert_index)
-                model = self.backbone
-                model.head = nn.Identity() # Dadurch kann man beim nächsten loopen den head nicht mehr ersetzten. Es gibt den namen "head" nicht mehr, weil das jetzt identity ist.
-                model.eval()
-                model.to(self.device)
-                
+            # Get expert features
+            from_ = 0
+            class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
+            # Process each image in the class and its flipped version
+            for images in class_loader:
+                bsz = images.shape[0]
+                images = images.to(self.device)
+                features = model(images)
+                class_features[from_: from_+bsz, :] = features
+                features = model(torch.flip(images, dims=(3,)))
+                class_features[from_+bsz: from_+2*bsz, :] = features
+                from_ += 2*bsz
 
-                from_ = 0
-                class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
-                # Process each image in the class and its flipped version
-                for images in class_loader:
-                    bsz = images.shape[0]
-                    images = images.to(self.device)
-                    features = model(images)
-                    class_features[from_: from_+bsz, :] = features
-                    features = model(torch.flip(images, dims=(3,)))
-                    class_features[from_+bsz: from_+2*bsz, :] = features
-                    from_ += 2*bsz
+            # Calculate distributions
+            cov_type = "full" if self.use_multivariate else "diag"
+            is_ok = False
+            eps = 1e-8
+            while not is_ok:
+                try:
+                    gmm = GaussianMixture(self.gmms, class_features.shape[1], covariance_type=cov_type, eps=eps).to(self.device)
+                    gmm.fit(class_features, delta=1e-3, n_iter=100)
+                except RuntimeError:
+                    eps = 10 * eps
+                    print(f"WARNING: Covariance matrix is singular. Increasing eps to: {eps:.7f} but this may hurt results")
+                else:
+                    is_ok = True
 
-                # Calculate distributions
-                cov_type = "full" if self.use_multivariate else "diag"
-                is_ok = False
-                eps = 1e-8
-                while not is_ok:
-                    try:
-                        gmm = GaussianMixture(self.gmms, class_features.shape[1], covariance_type=cov_type, eps=eps).to(self.device)
-                        gmm.fit(class_features, delta=1e-3, n_iter=100)
-                        print("fitting worked")
-                    except RuntimeError:
-                        eps = 10 * eps
-                        print(f"WARNING: Covariance matrix is singular. Increasing eps to: {eps:.7f} but this may hurt results")
-                    else:
-                        is_ok = True
-
-                if len(gmm.mu.data.shape) == 2:
-                    gmm.mu.data = gmm.mu.data.unsqueeze(1)
-                self.experts_distributions[expert_index].append(gmm)
-                print("added gmm")
+            if len(gmm.mu.data.shape) == 2:
+                gmm.mu.data = gmm.mu.data.unsqueeze(1)
+            self.experts_distributions[exp_index].append(gmm)
+            print("gmm added")
 
     @torch.no_grad()
     def eval(self):
