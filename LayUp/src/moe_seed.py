@@ -8,6 +8,7 @@ from .backbone.vpt import add_vpt
 from .backbone.util import call_in_all_submodules
 from .approach.mvgb import ClassMemoryDataset, ClassDirectoryDataset
 from .approach.gmm import GaussianMixture
+from scipy.stats import wasserstein_distance
 
 
 from .support_functions import check_gpu_memory
@@ -85,22 +86,15 @@ class MoE_SEED(nn.Module):
             self.experts_distributions.append([])
             self.train_expert(train_dataset)
         else:
-            expert_index = self.choose_expert_to_finetune(t, train_dataset)
+            expert_index = self.choose_expert_to_finetune(train_dataset)
             print(f"Finetuning expert {expert_index} on task {t}:")
-            self.finetune_expert(t, expert_index, train_dataset) 
+            self.finetune_expert(expert_index, train_dataset) 
             choosen_expert_index = expert_index
         
-        #self.create_distributions(train_dataset=train_dataset, exp_index=choosen_expert_index)
-                
-        '''
-        if t >= self.max_experts:
-            expert_to_finetune = self.choose_expert_to_finetune(t, train_dataset)
-            print(f"Finetuning expert {expert_to_finetune} on task {t}:")
-            #self.finetune_expert(t=t, expert_index=expert_to_finetune, train_dataset)
-        
         print(f"Creating distributions for task {t}:")
-        self.create_distributions(t, train_dataset)
-        '''
+        gmms = self.create_distributions(train_dataset=train_dataset, exp_index=choosen_expert_index)
+        for gmm in gmms:
+            self.experts_distributions[choosen_expert_index].append(gmm)
 
     def freeze_ViT_unfreeze_PEFT(self, model=None):
         # Freeze the backbone parameters based on names except for the head
@@ -150,7 +144,6 @@ class MoE_SEED(nn.Module):
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
 
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
-
         for epoch in range(self.finetune_epochs):
             running_loss = 0.0
             num_train_loader = len(train_loader)
@@ -217,82 +210,142 @@ class MoE_SEED(nn.Module):
         # Als Prototyp nehme ich erstmal den Average.
     
     @torch.no_grad()
-    def choose_expert_to_finetune(self, t, train_dataset):
+    def choose_expert_to_finetune(self, train_dataset):
         if self.selection_method == 'random':
             return self.selection_random()
         elif self.selection_method == 'eucld_dist':
             return self.selection_euclidean_distance(train_dataset)
         elif self.selection_method == 'kl_div':
-            return self.selection_kl_divergence(t, train_dataset)
+            return self.selection_kl_divergence(train_dataset)
         elif self.selection_method == 'ws_div':
-            return self.selection_ws_divergence()
+            return self.selection_ws_divergence(train_dataset)
         else:
             raise ValueError('Invalid selection method')
-    
+        # muss man bei beiden Divergenzen .argmin() oder .argmax() am Ende nehmen? In SEED wird bei KL Divergenz .argmax() genommen, aber was ist mit Wasserstein?
+        # geiches gilt für Euclidean Distance. Copilot nimmt bei WS und Eucl .argmin(). Ich wegen SEED Logik erstmal .argmax().
+
     def selection_random(self):
         # Randomly choose an expert to finetune
         return random.randint(0, self.max_experts - 1)
     
+    @torch.no_grad()
     def selection_euclidean_distance(self, train_dataset):
         # Euclidean distance between the current task distribution and the distributions of the experts
-        pass
-    
+        experts_mean_euclidean_dist = torch.zeros(self.max_experts, device=self.device)
+        
+        for expert_index in range(self.max_experts):
+            new_distributions = self.create_distributions(train_dataset, exp_index=expert_index)
+            
+            euclidean_matrix = torch.zeros((len(new_distributions), len(self.experts_distributions[expert_index])), device=self.device)
+            for n, new_gmm in enumerate(new_distributions):
+                
+                new_gauss = new_gmm.mu.data[0][0]
+                for o, old_gmm in enumerate(self.experts_distributions[expert_index]):
+                    old_gauss = old_gmm.mu.data[0][0]
+                    
+                    euclidean_dist = torch.cdist(new_gauss.unsqueeze(0), old_gauss.unsqueeze(0), p=2).item()
+                    euclidean_matrix[n, o] = euclidean_dist
+
+            experts_mean_euclidean_dist[expert_index] = torch.mean(euclidean_matrix)
+        print(experts_mean_euclidean_dist)
+        exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
+        return exp_to_finetune
+
     @torch.no_grad()
-    def selection_kl_divergence(self, t, train_dataset):
+    def selection_kl_divergence(self, train_dataset):
         # KL divergence between the current task distribution and the distributions of the experts
-        self.create_distributions(t, train_dataset)
-        print("Calculating KL Divergence")
+        experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
 
-            # Debug prints
-        print(f"t: {t}")
-        print(f"self.taskcla: {self.taskcla}")
-        print(f"len(self.taskcla): {len(self.taskcla)}")
-        
-        if t >= len(self.taskcla):
-            raise IndexError(f"Index t={t} is out of range for self.taskcla with length {len(self.taskcla)}")
-        
-        expert_overlap = torch.zeros(self.max_experts, device=self.device)
-        for expert_index in range(self.max_experts):
-            classes_in_t = self.taskcla[t][1]
-            new_distributions = self.experts_distributions[expert_index][-classes_in_t:]
-            kl_matrix = torch.zeros((len(new_distributions), len(new_distributions)), device=self.device)
-            for o, old_gauss_ in enumerate(new_distributions):
-                old_gauss = MultivariateNormal(old_gauss_.mu.data[0][0], covariance_matrix=old_gauss_.var.data[0][0])
-                for n, new_gauss_ in enumerate(new_distributions):
-                    new_gauss = MultivariateNormal(new_gauss_.mu.data[0][0], covariance_matrix=new_gauss_.var.data[0][0])
-                    kl_matrix[n, o] = torch.distributions.kl_divergence(new_gauss, old_gauss)
-            expert_overlap[expert_index] = torch.mean(kl_matrix)
-            self.experts_distributions[expert_index] = self.experts_distributions[expert_index][:-classes_in_t]
-        print(f"Expert overlap: {expert_overlap}")
-        expert_to_finetune = torch.argmax(expert_overlap)
-        self.taskcla = self.taskcla[:-1]
-        return int(expert_to_finetune)
-        """
-        expert_overlap = torch.zeros(self.max_experts, device=self.device)
-        for expert_index in range(self.max_experts):
-            self.switch_to_expert(expert_index)
-            #expert_overlap[expert_index] = self.calculate_kl_divergences(t, expert_index)
-            new_distributions = self.experts_distributions[expert_index]
-            kl_matrix = torch.zeros((len(new_distributions), len(new_distributions)), device=self.device)
-            
-            for o, old_gauss_ in enumerate(new_distributions):
-                old_gauss = MultivariateNormal(old_gauss_.mu.data[0][0], covariance_matrix=old_gauss_.var.data[0][0])
-                for n, new_gauss_ in enumerate(new_distributions):
-                    new_gauss = MultivariateNormal(new_gauss_.mu.data[0][0], covariance_matrix=new_gauss_.var.data[0][0])
-                    kl_matrix[n, o] = torch.distributions.kl_divergence(new_gauss, old_gauss)
-            
-        
-            expert_overlap[expert_index] = torch.mean(kl_matrix)
+        for expert_index in range(self.max_experts): # min kann später weg
+            new_distributions = self.create_distributions(train_dataset, expert_index)
 
-        expert_to_finetune = torch.argmax(expert_overlap)
-        return int(expert_to_finetune)
-        """
+            kl_matrix = torch.zeros((len(new_distributions), len(self.experts_distributions[expert_index])), device=self.device)
+            for n, new_gmm in enumerate(new_distributions):
 
-    def selection_ws_divergence(self, t):
+                new_gauss = MultivariateNormal(new_gmm.mu.data[0][0], covariance_matrix=new_gmm.var.data[0][0])
+                for o, old_gmm in enumerate(self.experts_distributions[expert_index]):
+                    old_gauss = MultivariateNormal(old_gmm.mu.data[0][0], covariance_matrix=old_gmm.var.data[0][0])
+
+                    #
+                    '''
+                    new_gmm = torch.full((1, 1, 10), 10.)
+                    new_cov = torch.eye(10) * 0.1
+                    new_gauss = MultivariateNormal(new_gmm[0][0], covariance_matrix=new_cov)
+
+
+                    old_gmm1 = torch.full((1, 1, 10), 5.)
+                    old_cov1 = torch.eye(10) * 0.1
+                    old_gauss1 = MultivariateNormal(old_gmm1[0][0], covariance_matrix=old_cov1)
+
+                    old_gmm2 = torch.full((1, 1, 10), 10.)
+                    old_cov2 = torch.eye(10) * 0.1
+                    old_gauss2 = MultivariateNormal(old_gmm2[0][0], covariance_matrix=old_cov2)
+
+                    old_gmm3 = torch.full((1, 1, 10), 15.)
+                    old_cov3 = torch.eye(10) * 0.1
+                    old_gauss3 = MultivariateNormal(old_gmm3[0][0], covariance_matrix=old_cov3)
+
+                    old_gmm4 = torch.full((1, 1, 10), 20.)
+                    old_cov4 = torch.eye(10) * 0.1
+                    old_gauss4 = MultivariateNormal(old_gmm4[0][0], covariance_matrix=old_cov4)
+
+                    kl_div1 = torch.distributions.kl_divergence(new_gauss, old_gauss1)
+                    kl_div2 = torch.distributions.kl_divergence(new_gauss, old_gauss2)
+                    kl_div3 = torch.distributions.kl_divergence(new_gauss, old_gauss3)
+                    kl_div4 = torch.distributions.kl_divergence(new_gauss, old_gauss4)
+
+                    kl_div5 = torch.distributions.kl_divergence(old_gauss1, new_gauss)
+                    kl_div6 = torch.distributions.kl_divergence(old_gauss2, new_gauss)
+                    kl_div7 = torch.distributions.kl_divergence(old_gauss3, new_gauss)
+                    kl_div8 = torch.distributions.kl_divergence(old_gauss4, new_gauss)
+
+                    print("KL Divergence(new, old)")
+                    print(f"KL Divergence 1: {kl_div1}")
+                    print(f"KL Divergence 2: {kl_div2}")
+                    print(f"KL Divergence 3: {kl_div3}")
+                    print(f"KL Divergence 4: {kl_div4}")
+
+                    print("KL Divergence(old, new)")
+                    print(f"KL Divergence 1: {kl_div5}")
+                    print(f"KL Divergence 2: {kl_div6}")
+                    print(f"KL Divergence 3: {kl_div7}")
+                    print(f"KL Divergence 4: {kl_div8}")
+
+
+                    assert False
+                    '''
+                    #
+
+                    kl_div = torch.distributions.kl_divergence(new_gauss, old_gauss) # KL divergence between the current task distribution and the distributions of the experts (of each class)
+                    kl_matrix[n, o] = kl_div
+
+            experts_mean_kl_div[expert_index] = torch.mean(kl_matrix)
+        exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
+        return exp_to_finetune        
+
+    @torch.no_grad()
+    def selection_ws_divergence(self, train_dataset):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
-        pass
+        experts_mean_ws_div = torch.zeros(self.max_experts, device=self.device)
 
-    def finetune_expert(self, t, expert_index, train_dataset):
+        for expert_index in range(self.max_experts):
+            new_distributions = self.create_distributions(train_dataset, expert_index) # Create distributions for the current task
+
+            ws_matrix = torch.zeros((len(new_distributions), len(self.experts_distributions[expert_index])), device=self.device)
+            for n, new_gmm in enumerate(new_distributions):
+
+                new_gauss = new_gmm.mu.data[0][0].cpu().numpy()
+                for o, old_gmm in enumerate(self.experts_distributions[expert_index]):
+                    old_gauss = old_gmm.mu.data[0][0].cpu().numpy()
+
+                    ws_div = wasserstein_distance(new_gauss, old_gauss)
+                    ws_matrix[n, o] = ws_div
+
+            experts_mean_ws_div[expert_index] = torch.mean(ws_matrix)
+        exp_to_finetune = torch.argmax(experts_mean_ws_div)  # Choose expert with the lowest Wasserstein divergence
+        return exp_to_finetune
+
+    def finetune_expert(self, expert_index, train_dataset):
         self.switch_to_expert(expert_index)
         old_model = copy.deepcopy(self.backbone)
         old_model.eval()
@@ -373,13 +426,14 @@ class MoE_SEED(nn.Module):
         model.eval()
         model.to(self.device)
 
+        gmms = []
+
         # Iterate over each class
         unique_labels = all_labels.unique()
         for class_label in unique_labels:
             # Get all images of the class
             class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
             class_images = all_images[class_indices]
-
             class_loader = DataLoader(
                 class_images,
                 batch_size=self.batch_size,
@@ -400,7 +454,6 @@ class MoE_SEED(nn.Module):
                 features = model(torch.flip(images, dims=(3,)))
                 class_features[from_+bsz: from_+2*bsz, :] = features
                 from_ += 2*bsz
-
             # Calculate distributions
             cov_type = "full" if self.use_multivariate else "diag"
             is_ok = False
@@ -411,14 +464,21 @@ class MoE_SEED(nn.Module):
                     gmm.fit(class_features, delta=1e-3, n_iter=100)
                 except RuntimeError:
                     eps = 10 * eps
-                    print(f"WARNING: Covariance matrix is singular. Increasing eps to: {eps:.7f} but this may hurt results")
                 else:
+                    #print(f"WARNING: Covariance matrix is singular. Increasing eps from: {1e-8:.7f} to: {eps:.7f} but this may hurt results")   ###Muss später wieder rein
                     is_ok = True
 
             if len(gmm.mu.data.shape) == 2:
                 gmm.mu.data = gmm.mu.data.unsqueeze(1)
-            self.experts_distributions[exp_index].append(gmm)
-            print("gmm added")
+
+            gmm_shape = gmm.mu.data.shape
+            assert len(gmm_shape) == 3
+            assert gmm_shape[0] == 1
+            assert gmm_shape[1] == 1
+            assert gmm_shape[2] == model.num_features
+
+            gmms.append(gmm)
+        return gmms
 
     @torch.no_grad()
     def eval(self):

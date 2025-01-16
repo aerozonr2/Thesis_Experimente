@@ -3,6 +3,8 @@
 **/local_data
 **/__pycache__
 **/wandb/
+**/results/
 /LayUp/cProfile/
 .venv/
+/data/
 

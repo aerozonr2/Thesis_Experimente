@@ -327,7 +327,7 @@ def use_layup(data_manager, train_transform, test_transform, args):
 
 
 
-def use_moe(data_manager, train_transform, test_transform, args):
+def use_moe(data_manager, train_transform, test_transform, args): # test_transform muss noch integriert werden
     model = MoE_SEED(args)
     model.save_backbone_param_names()
     model.num_classes = data_manager.num_classes
@@ -339,7 +339,7 @@ def use_moe(data_manager, train_transform, test_transform, args):
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
         train_dataset.transform = train_transform
-        print(f"Task {t}")
+        print(f"# Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
