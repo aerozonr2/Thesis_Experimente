@@ -328,10 +328,13 @@ class Appr(Inc_Learning_Appr):
         """Contains the evaluation code"""
         total_loss, total_acc_taw, total_acc_tag, total_num = 0, 0, 0, 0
         self.model.eval()
+        print(f"Loops: {len(val_loader)}")
         for images, targets in val_loader:
             targets = targets.to(self.device)
             # Forward current model
+            print(f"Images shape/batch size: {images.shape}")
             features = self.model(images.to(self.device))
+            print("Features calculated")
             hits_taw, hits_tag = self.calculate_metrics(features, targets, t)
             # Log
             total_loss = 0
@@ -350,6 +353,14 @@ class Appr(Inc_Learning_Appr):
 
     @torch.no_grad()
     def predict_class_bayes(self, t, features):
+        print("### Predicting class using Bayes ###")
+        print("#####################################")
+        print(f"Number of classes: {len(self.experts_distributions[0])}")
+        print(f"Number of samples: {features.shape[0]}")
+        print(f"Number of experts: {features.shape[1]}")
+        print("###")
+        print(f"T: {t}")
+        print(f"feature shape: {features.shape}")
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=-1e8, device=features.device)
         mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
         for bb_num, _ in enumerate(self.experts_distributions):
@@ -370,6 +381,7 @@ class Appr(Inc_Learning_Appr):
         log_probs = softmax_temperature(log_probs, dim=2, tau=self.tau)
         confidences = torch.sum(log_probs, dim=1) / torch.sum(mask, dim=1)
         tag_class_id = torch.argmax(confidences, dim=1)
+        print("#####################################")
         return taw_class_id, tag_class_id
 
     def criterion(self, t, outputs, targets, features=None, old_features=None):

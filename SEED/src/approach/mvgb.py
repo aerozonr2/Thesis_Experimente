@@ -3,6 +3,8 @@ import pickle
 import random
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 from argparse import ArgumentParser
 from itertools import compress
@@ -119,11 +121,11 @@ class Appr(Inc_Learning_Appr):
     """Class implementing the joint baseline"""
 
     def __init__(self, model, device, nepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
-                 momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, patience=5, fix_bn=False, eval_on_train=False,
-                 logger=None, gmms=1, use_multivariate=True, use_head=False, remove_outliers=False, load_distributions=False, save_distributions=False):
+                momentum=0, wd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, patience=5, fix_bn=False, eval_on_train=False,
+                logger=None, gmms=1, use_multivariate=True, use_head=False, remove_outliers=False, load_distributions=False, save_distributions=False):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
-                                   multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
-                                   exemplars_dataset=None)
+                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
+                                    exemplars_dataset=None)
         self.gmms = gmms
         self.patience = patience
         self.use_multivariate = use_multivariate
@@ -288,9 +290,9 @@ class Appr(Inc_Learning_Appr):
             classes = self.model.taskcla[t][1]
             self.model.task_offset.append(self.model.task_offset[-1] + classes)
             transforms = Compose([t for t in val_loader.dataset.transform.transforms
-                                  if "CenterCrop" in t.__class__.__name__
-                                  or "ToTensor" in t.__class__.__name__
-                                  or "Normalize" in t.__class__.__name__])
+                                    if "CenterCrop" in t.__class__.__name__
+                                    or "ToTensor" in t.__class__.__name__
+                                    or "Normalize" in t.__class__.__name__])
             for c in range(classes):
                 c = c + self.model.task_offset[t]
                 train_indices = torch.tensor(trn_loader.dataset.labels) == c
@@ -362,7 +364,7 @@ class Appr(Inc_Learning_Appr):
         # Task-Aware
         classes = self.model.task_offset[t+1] - self.model.task_offset[t]
         log_probs = [self.task_distributions[t].score_samples(features) for
-                     t in range(self.model.task_offset[t], self.model.task_offset[t] + classes)]
+                    t in range(self.model.task_offset[t], self.model.task_offset[t] + classes)]
         log_probs = torch.stack(log_probs, dim=1)
         class_id = torch.argmax(log_probs, dim=1) + self.model.task_offset[t]
         hits_taw = (class_id == targets).float()

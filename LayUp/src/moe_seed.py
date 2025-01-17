@@ -491,11 +491,12 @@ class MoE_SEED(nn.Module):
     @torch.no_grad() 
     def predict_class_bayes(self, t, features): # Etwas angefangen
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=-1e8, device=features.device)
-        assert len(self.experts_distributions[0]) == self.num_classes
-        assert len(self.experts_distributions) == self.max_experts
         mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
 
-        #?
+        ## ich muss in den Exp_distr einbauen ob ein Task nicht gelernt wurde.
+        ## das wird in Seed über task_offset gemacht.
+        ## ich mache das wahrscheinlich durch das hinzufügen einer leeren liste
+        ## Das wird dann im loop überprüft
         for expert_index, _ in enumerate(self.experts_distributions):
             for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
                 c += self.model.task_offset[expert_index]
