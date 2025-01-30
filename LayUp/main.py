@@ -30,7 +30,7 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
-from src.support_functions import check_gpu_memory, shrink_dataset
+from src.support_functions import check_gpu_memory, shrink_dataset, display_profile
 
 
 def set_seed(seed):
@@ -498,6 +498,8 @@ if __name__ == "__main__":
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="random", choices=["random", "eucld_dist", "kl_div", "ws_div"])
+    parser.add_argument('--classification', type=str, default='average', choices=['average', "bayesian"]) # kommt am ende weg?
+    parser.add_argument('--kd', help='Use knowledge distillation', action='store_true', default=False)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -520,6 +522,8 @@ if __name__ == "__main__":
     setup_logger(args)
 
 
-    #cProfile.run('main(args)', 'cProfile/profile_output.prof')
-    main(args)
+    #display_profile()
+    #assert False
+    cProfile.run('main(args)', 'cProfile/profile_output2.prof')
+    #main(args)
     # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen ?

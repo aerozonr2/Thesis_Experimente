@@ -6,6 +6,7 @@ import importlib
 import numpy as np
 import random
 import utils
+import cProfile
 
 import approach
 

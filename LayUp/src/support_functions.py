@@ -75,4 +75,4 @@ def move_large_tensor_to_gpu():
     print(f"Tensor is on device: {tensor.device}")
 
 if __name__ == "__main__":
-    pass
+    display_profile()

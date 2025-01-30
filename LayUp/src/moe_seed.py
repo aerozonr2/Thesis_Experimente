@@ -32,9 +32,6 @@ from torch.distributions import MultivariateNormal
 
 #torch.backends.cuda.matmul.allow_tf32 = False
 
-# Required?
-def softmax_temperature(x, dim, tau=1.0):
-    return torch.softmax(x / tau, dim=dim)
 
 class MoE_SEED(nn.Module):
     def __init__(self, args):
@@ -53,11 +50,13 @@ class MoE_SEED(nn.Module):
         self.backbone_param_names = []
         self.num_classes = None
         self.alpha = 0.99 # Knowledge distillation parameter for the loss function. 1.0 means no knowledge distillation. 0.99 is from SEED.
-        self.taskcla = []
         self.gmms = args.gmms
         self.use_multivariate = args.use_multivariate
         self.selection_method = args.selection_method
         self.empty_expert = {}
+        self.tau = 1.0 # Muss in args rein
+        self.classification = args.classification # average/bayes
+        self.kd = args.kd # muss am ende Weg?
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -79,7 +78,6 @@ class MoE_SEED(nn.Module):
             raise ValueError('Invalid finetune method')
 
     def train_loop(self, t, train_dataset):
-        self.taskcla.append([])
         choosen_expert_index = t
         if t < self.max_experts:
             print(f"Training expert {t} on task {t}:")
@@ -184,31 +182,41 @@ class MoE_SEED(nn.Module):
 
     @torch.no_grad()
     def forward(self, x):
+        if self.classification == 'average':
+            return self.forward_average(x)
+        elif self.classification == 'bayesian':
+            return self.forward_bayes(x)
+        else:
+            raise ValueError('Invalid classification method')
+
+    @torch.no_grad()
+    def forward_average(self, x):
         features = []
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
             out = self.backbone(x)
             features.append(out)
-        #return torch.stack(features, dim=1) # Stack the features to get a tensor of shape (?, num_experts, logits_of_classes) as in SEED
-
 
         # Stack the features to get a tensor of shape (1, num_experts, logits_of_classes)
-        features = torch.stack(features, dim=1)
-        
+        features = torch.stack(features, dim=1)        
         # Compute the mean along the num_experts dimension (dimension 1)
         average_logits = torch.mean(features, dim=1)
-        
         # Squeeze the tensor to remove the singleton dimension
         average_logits = average_logits.squeeze(0)
         
         return average_logits
 
+    @torch.no_grad()
+    def forward_bayes(self, x):
+        features = []
+        for expert_index in range(len(self.experts)):
+            self.switch_to_expert(expert_index)
+            out = self.backbone(x)
+            features.append(out)
+        id = self.predict_class_bayes(features=torch.stack(features, dim=1))
+        print(id)
+        return id
 
-        # was mache ich mit dem output?
-        # Der muss entweder geaveraged werden oder ich mache das mit bayes wie in SEED
-        # zweiteres wäre besser. Kann ich einfach die Funktion aus SEED kopieren?
-        # Als Prototyp nehme ich erstmal den Average.
-    
     @torch.no_grad()
     def choose_expert_to_finetune(self, train_dataset):
         if self.selection_method == 'random':
@@ -232,7 +240,7 @@ class MoE_SEED(nn.Module):
     def selection_euclidean_distance(self, train_dataset):
         # Euclidean distance between the current task distribution and the distributions of the experts
         experts_mean_euclidean_dist = torch.zeros(self.max_experts, device=self.device)
-        
+
         for expert_index in range(self.max_experts):
             new_distributions = self.create_distributions(train_dataset, exp_index=expert_index)
             
@@ -361,7 +369,56 @@ class MoE_SEED(nn.Module):
 
         # Finetune model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
-        
+# GPT für .item() runtime Verbesserung. Dadurch werden die batches küntstlich größer. und ich muss das auch in Train_expert machen. und switch expert!?!
+# als näyhstes nochmal laufen lassen und cprofile vergleichen: --T 10!
+        train_loader = DataLoader(
+            train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True
+        )
+
+        for epoch in range(self.finetune_epochs):
+            model.train()
+            
+            for m in model.modules():
+                if isinstance(m, nn.BatchNorm2d):
+                    m.eval()
+
+            running_loss = 0.0
+            num_train_loader = len(train_loader)
+            
+            pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
+            
+            loss_accumulator = []  # Store losses as tensors
+            
+            for _, (inputs, labels) in pbar:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                optimizer.zero_grad()
+                
+                with torch.no_grad():
+                    old_features = old_model.forward_features(inputs)
+                
+                outputs = model(inputs)
+                features = model.forward_features(inputs)
+
+                if self.kd:
+                    loss = self.criterion(outputs, labels, features, old_features)
+                else:
+                    loss = self.criterion(outputs, labels)
+                
+                loss.backward()
+                optimizer.step()
+
+                loss_accumulator.append(loss.detach())  # Keep loss as tensor
+
+            # Convert to tensor, take mean, and only then call .item()
+            epoch_loss = torch.stack(loss_accumulator).mean().item()
+            
+            print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {epoch_loss}")
+
+
+
+
+#
+        '''
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             model.train()
@@ -373,22 +430,25 @@ class MoE_SEED(nn.Module):
             num_train_loader = len(train_loader)
             pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
             # Logger.instance().add_backend(TQDMLogger(pbar)) # Ist is LayUp, weiß nicht ob notwendig
-            for batch_id, (inputs, labels) in pbar:
-                bsz = inputs.shape[0]
+            for _, (inputs, labels) in pbar:
+                #bsz = inputs.shape[0]
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 with torch.no_grad():
-                        old_features = old_model(inputs) # Muss Identity head haben!
+                        old_features = old_model.forward_features(inputs)
                 outputs = model(inputs)
                 features = model.forward_features(inputs)
 
-                loss = self.criterion(outputs, labels)# , features, old_features) => Error
+                if self.kd:
+                    loss = self.criterion(outputs, labels, features, old_features)
+                else:
+                    loss = self.criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
-
+            '''
                 # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
@@ -489,30 +549,27 @@ class MoE_SEED(nn.Module):
         pass
     
     @torch.no_grad() 
-    def predict_class_bayes(self, t, features): # Etwas angefangen
+    def predict_class_bayes(self, features): # Taskoffset und übersezung fehlen noch
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=-1e8, device=features.device)
+        # shape: (batch_size, num_experts, num_classes/num_distr. learned by expert one) 
         mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
 
         ## ich muss in den Exp_distr einbauen ob ein Task nicht gelernt wurde.
         ## das wird in Seed über task_offset gemacht.
-        ## ich mache das wahrscheinlich durch das hinzufügen einer leeren liste
-        ## Das wird dann im loop überprüft
-        for expert_index, _ in enumerate(self.experts_distributions):
-            for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
-                c += self.model.task_offset[expert_index]
-                log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
-                mask[:, expert_index, c] = True # "diese Klasse wurde von diesem Experten gelernt", glaube ich
-
-
-        # Von Copilot
+        ## ich mache das wahrscheinlich durch das hinzufügen einer leeren liste, gibt dann aber evtl. ein Problem mit selection_method, weil ich dann manchmal ein leeres array habe.
         for expert_index in range(len(self.experts_distributions)):
-            for class_index in range(len(self.experts_distributions[expert_index])):
-                gmm = self.experts_distributions[expert_index][class_index]
-                if self.use_multivariate:
-                    log_probs[:, expert_index, class_index] = gmm.log_prob(features)
-                else:
-                    log_probs[:, expert_index, class_index] = gmm.log_prob(features)   
-    
+            for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
+                c += self.task_offset[expert_index] # welcher Task/Klasse? wurde von welchem Experten gelernt
+                log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
+                mask[:, expert_index, c] = True # "diese Klasse wurde von diesem Experten gelernt"
+        
+        log_probs = torch.softmax(log_probs/self.tau, dim=2)
+        confidences = torch.sum(log_probs, dim=1) / torch.sum(mask, dim=1)
+        tag_class_id = torch.argmax(confidences, dim=1)
+        # muss für evaluation was anderes returnen(logits).
+        # Er kommt noch durcheinander weil nicht jeder Experte die gleiche (Anzahl) an Klassen gelernt hat.
+        return tag_class_id
+
     def criterion(self, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""
         ce_loss = nn.functional.cross_entropy(outputs, targets, label_smoothing=0.0)
