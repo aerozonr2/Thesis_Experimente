@@ -81,7 +81,11 @@ class MoE_SEED(nn.Module):
         choosen_expert_index = t
         if t < self.max_experts:
             print(f"Training expert {t} on task {t}:")
-            self.experts_distributions.append([])
+            total_classes_learned_by_all_exp = 0
+            if len(self.experts_distributions) != 0:
+                total_classes_learned_by_all_exp = max(len(exp_distributions) for exp_distributions in self.experts_distributions)
+            self.experts_distributions.append([[] for _ in range(total_classes_learned_by_all_exp)])
+
             self.train_expert(train_dataset)
         else:
             expert_index = self.choose_expert_to_finetune(train_dataset)
@@ -92,7 +96,11 @@ class MoE_SEED(nn.Module):
         print(f"Creating distributions for task {t}:")
         gmms = self.create_distributions(train_dataset=train_dataset, exp_index=choosen_expert_index)
         for gmm in gmms:
-            self.experts_distributions[choosen_expert_index].append(gmm)
+            for expert_index in range(len(self.experts_distributions)):
+                if expert_index == choosen_expert_index:
+                    self.experts_distributions[choosen_expert_index].append(gmm)
+                else:
+                    self.experts_distributions[expert_index].append([])
 
     def freeze_ViT_unfreeze_PEFT(self, model=None):
         # Freeze the backbone parameters based on names except for the head
@@ -156,26 +164,8 @@ class MoE_SEED(nn.Module):
                 optimizer.step()
                 running_loss += loss.item()
 
-
-
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
 
-            #
-            print("#"*50)
-            print(len(train_loader))
-            print(f"input shape: {inputs.shape}")
-            print(f"output shape: {outputs.shape}")
-            print(outputs[0])
-            print(f"target shape: {labels.shape}")
-            print(labels[0])
-            print("#"*10)
-            for inputs, labels in train_loader:
-                print(f"input shape: {inputs.shape}")
-                print(f"target shape: {labels.shape}")
-                print(labels)
-                break
-            print("#"*50)
-            #
 
         # Save Expert parameters
         expert_parameters = {}
@@ -259,12 +249,13 @@ class MoE_SEED(nn.Module):
 
         for expert_index in range(self.max_experts):
             new_distributions = self.create_distributions(train_dataset, exp_index=expert_index)
+            learned_distributions = [lst for lst in self.experts_distributions[expert_index] if lst] # Filter out empty lists
             
-            euclidean_matrix = torch.zeros((len(new_distributions), len(self.experts_distributions[expert_index])), device=self.device)
+            euclidean_matrix = torch.zeros((len(new_distributions), len(learned_distributions)), device=self.device)
             for n, new_gmm in enumerate(new_distributions):
                 
                 new_gauss = new_gmm.mu.data[0][0]
-                for o, old_gmm in enumerate(self.experts_distributions[expert_index]):
+                for o, old_gmm in enumerate(learned_distributions):
                     old_gauss = old_gmm.mu.data[0][0]
                     
                     euclidean_dist = torch.cdist(new_gauss.unsqueeze(0), old_gauss.unsqueeze(0), p=2).item()
@@ -280,14 +271,15 @@ class MoE_SEED(nn.Module):
         # KL divergence between the current task distribution and the distributions of the experts
         experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
 
-        for expert_index in range(self.max_experts): # min kann später weg
+        for expert_index in range(self.max_experts):
             new_distributions = self.create_distributions(train_dataset, expert_index)
+            learned_distributions = [lst for lst in self.experts_distributions[expert_index] if lst] # Filter out empty lists
 
-            kl_matrix = torch.zeros((len(new_distributions), len(self.experts_distributions[expert_index])), device=self.device)
+            kl_matrix = torch.zeros((len(new_distributions), len(learned_distributions)), device=self.device)
             for n, new_gmm in enumerate(new_distributions):
 
                 new_gauss = MultivariateNormal(new_gmm.mu.data[0][0], covariance_matrix=new_gmm.var.data[0][0])
-                for o, old_gmm in enumerate(self.experts_distributions[expert_index]):
+                for o, old_gmm in enumerate(learned_distributions):
                     old_gauss = MultivariateNormal(old_gmm.mu.data[0][0], covariance_matrix=old_gmm.var.data[0][0])
 
                     #
@@ -354,12 +346,13 @@ class MoE_SEED(nn.Module):
 
         for expert_index in range(self.max_experts):
             new_distributions = self.create_distributions(train_dataset, expert_index) # Create distributions for the current task
+            learned_distributions = [lst for lst in self.experts_distributions[expert_index] if lst] # Filter out empty lists
 
-            ws_matrix = torch.zeros((len(new_distributions), len(self.experts_distributions[expert_index])), device=self.device)
+            ws_matrix = torch.zeros((len(new_distributions), len(learned_distributions)), device=self.device)
             for n, new_gmm in enumerate(new_distributions):
 
                 new_gauss = new_gmm.mu.data[0][0].cpu().numpy()
-                for o, old_gmm in enumerate(self.experts_distributions[expert_index]):
+                for o, old_gmm in enumerate(learned_distributions):
                     old_gauss = old_gmm.mu.data[0][0].cpu().numpy()
 
                     ws_div = wasserstein_distance(new_gauss, old_gauss)
@@ -519,23 +512,29 @@ class MoE_SEED(nn.Module):
     @torch.no_grad() 
     def predict_class_bayes(self, features): # Taskoffset und übersezung fehlen noch
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=-1e8, device=features.device)
+        #log_probs = torch.full(features.shape, fill_value=-1e8, device=features.device) ?
         # shape: (batch_size, num_experts, num_classes/num_distr. learned by expert one) 
         mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
 
-        ## ich muss in den Exp_distr einbauen ob ein Task nicht gelernt wurde.
-        ## das wird in Seed über task_offset gemacht.
-        ## ich mache das wahrscheinlich durch das hinzufügen einer leeren liste, gibt dann aber evtl. ein Problem mit selection_method, weil ich dann manchmal ein leeres array habe.
         for expert_index in range(len(self.experts_distributions)):
             for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
-                c += self.task_offset[expert_index] # welcher Task/Klasse? wurde von welchem Experten gelernt
-                log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
-                mask[:, expert_index, c] = True # "diese Klasse wurde von diesem Experten gelernt"
-        
+
+                if class_gmm == []: # Class not learned by this expert
+                    continue
+                else:
+                    #
+                    print("#"*50)
+                    print(class_gmm.mu.data.shape)
+                    print(features.shape) # (batch_size, num_experts, x) x sind logits. müssen aber glaube ich features sein
+                    print("#"*50)
+                    #
+                    log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
+                    mask[:, expert_index, c] = True # "diese Klasse wurde von diesem Experten gelernt"
+            
         log_probs = torch.softmax(log_probs/self.tau, dim=2)
         confidences = torch.sum(log_probs, dim=1) / torch.sum(mask, dim=1)
         tag_class_id = torch.argmax(confidences, dim=1)
         # muss für evaluation was anderes returnen(logits).
-        # Er kommt noch durcheinander weil nicht jeder Experte die gleiche (Anzahl) an Klassen gelernt hat.
         return tag_class_id
 
     def criterion(self, outputs, targets, features=None, old_features=None):

@@ -498,7 +498,7 @@ if __name__ == "__main__":
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="random", choices=["random", "eucld_dist", "kl_div", "ws_div"])
-    parser.add_argument('--classification', type=str, default='average', choices=['average', "bayesian"]) # kommt am ende weg?
+    parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) # kommt am ende weg?
     parser.add_argument('--kd', help='Use knowledge distillation', action='store_true', default=False)
 
     # augmentations
