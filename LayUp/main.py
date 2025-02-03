@@ -524,6 +524,9 @@ if __name__ == "__main__":
 
     #display_profile()
     #assert False
-    cProfile.run('main(args)', 'cProfile/profile_output2.prof')
+    cProfile.run('main(args)', 'cProfile/profile_output3.prof')
+    display_profile('cProfile/profile_output2.prof')
+    print("#################")
+    display_profile('cProfile/profile_output3.prof')
     #main(args)
     # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen ?

@@ -145,10 +145,9 @@ class MoE_SEED(nn.Module):
         for epoch in range(self.finetune_epochs):
             running_loss = 0.0
             num_train_loader = len(train_loader)
-            pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader) #total=num_train_loader
+            pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
             # Logger.instance().add_backend(TQDMLogger(pbar)) # Ist is LayUp, weiß nicht ob notwendig
-            for batch_id, (inputs, labels) in pbar:
-                #print(f'Epoch: {epoch}, Batch: {batch_id + 1}/{num_train_loader}')
+            for _, (inputs, labels) in pbar:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 outputs = model(inputs)
@@ -160,6 +159,23 @@ class MoE_SEED(nn.Module):
 
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
+
+            #
+            print("#"*50)
+            print(len(train_loader))
+            print(f"input shape: {inputs.shape}")
+            print(f"output shape: {outputs.shape}")
+            print(outputs[0])
+            print(f"target shape: {labels.shape}")
+            print(labels[0])
+            print("#"*10)
+            for inputs, labels in train_loader:
+                print(f"input shape: {inputs.shape}")
+                print(f"target shape: {labels.shape}")
+                print(labels)
+                break
+            print("#"*50)
+            #
 
         # Save Expert parameters
         expert_parameters = {}
@@ -371,54 +387,6 @@ class MoE_SEED(nn.Module):
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
 # GPT für .item() runtime Verbesserung. Dadurch werden die batches küntstlich größer. und ich muss das auch in Train_expert machen. und switch expert!?!
 # als näyhstes nochmal laufen lassen und cprofile vergleichen: --T 10!
-        train_loader = DataLoader(
-            train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True
-        )
-
-        for epoch in range(self.finetune_epochs):
-            model.train()
-            
-            for m in model.modules():
-                if isinstance(m, nn.BatchNorm2d):
-                    m.eval()
-
-            running_loss = 0.0
-            num_train_loader = len(train_loader)
-            
-            pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
-            
-            loss_accumulator = []  # Store losses as tensors
-            
-            for _, (inputs, labels) in pbar:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                optimizer.zero_grad()
-                
-                with torch.no_grad():
-                    old_features = old_model.forward_features(inputs)
-                
-                outputs = model(inputs)
-                features = model.forward_features(inputs)
-
-                if self.kd:
-                    loss = self.criterion(outputs, labels, features, old_features)
-                else:
-                    loss = self.criterion(outputs, labels)
-                
-                loss.backward()
-                optimizer.step()
-
-                loss_accumulator.append(loss.detach())  # Keep loss as tensor
-
-            # Convert to tensor, take mean, and only then call .item()
-            epoch_loss = torch.stack(loss_accumulator).mean().item()
-            
-            print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {epoch_loss}")
-
-
-
-
-#
-        '''
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             model.train()
@@ -448,8 +416,8 @@ class MoE_SEED(nn.Module):
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
-            '''
-                # Save Expert parameters
+
+        # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
             if name not in self.backbone_param_names:
@@ -458,7 +426,7 @@ class MoE_SEED(nn.Module):
                 pass # Not saving backbone parameters
         self.experts[expert_index] = copy.deepcopy(expert_parameters)
         self.expert_heads[expert_index] = copy.deepcopy(self.backbone.head.state_dict())
-        
+
     @torch.no_grad()
     def create_distributions(self, train_dataset, exp_index):
         """ 
