@@ -217,11 +217,11 @@ class MoE_SEED(nn.Module):
         features = []
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
+            self.backbone.head = nn.Identity()
             out = self.backbone(x)
             features.append(out)
-        id = self.predict_class_bayes(features=torch.stack(features, dim=1))
-        print(id)
-        return id
+        synthetic_softmaxed_logits = self.predict_class_bayes(features=torch.stack(features, dim=1))
+        return synthetic_softmaxed_logits
 
     @torch.no_grad()
     def choose_expert_to_finetune(self, train_dataset):
@@ -262,7 +262,6 @@ class MoE_SEED(nn.Module):
                     euclidean_matrix[n, o] = euclidean_dist
 
             experts_mean_euclidean_dist[expert_index] = torch.mean(euclidean_matrix)
-        print(experts_mean_euclidean_dist)
         exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
         return exp_to_finetune
 
@@ -425,8 +424,7 @@ class MoE_SEED(nn.Module):
         """ 
         Create distributions for task t.
         One distribution for each class.
-        The distributions are stored in self.experts_distributions[expert_index],
-        but only for the expert who leared the Task
+        The distributions are stored in self.experts_distributions[expert_index].
         """
         # Collect all images and labels needs much time
         all_images = []
@@ -512,30 +510,21 @@ class MoE_SEED(nn.Module):
     @torch.no_grad() 
     def predict_class_bayes(self, features): # Taskoffset und übersezung fehlen noch
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=-1e8, device=features.device)
-        #log_probs = torch.full(features.shape, fill_value=-1e8, device=features.device) ?
         # shape: (batch_size, num_experts, num_classes/num_distr. learned by expert one) 
         mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
-
         for expert_index in range(len(self.experts_distributions)):
             for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
 
                 if class_gmm == []: # Class not learned by this expert
                     continue
                 else:
-                    #
-                    print("#"*50)
-                    print(class_gmm.mu.data.shape)
-                    print(features.shape) # (batch_size, num_experts, x) x sind logits. müssen aber glaube ich features sein
-                    print("#"*50)
-                    #
                     log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
-                    mask[:, expert_index, c] = True # "diese Klasse wurde von diesem Experten gelernt"
+                    mask[:, expert_index, c] = True # This class was learned by this expert
             
         log_probs = torch.softmax(log_probs/self.tau, dim=2)
         confidences = torch.sum(log_probs, dim=1) / torch.sum(mask, dim=1)
-        tag_class_id = torch.argmax(confidences, dim=1)
-        # muss für evaluation was anderes returnen(logits).
-        return tag_class_id
+
+        return confidences
 
     def criterion(self, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""

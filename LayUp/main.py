@@ -209,7 +209,6 @@ def eval_dataset(model, dataset, args):
         y = y.to(args.device)
 
         y_hat = model(x)
-
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
     
@@ -220,7 +219,6 @@ def eval_dataset(model, dataset, args):
     predictions = np.concatenate(predictions, axis=0)
     labels = np.concatenate(labels, axis=0)
     acc = (predictions.argmax(1) == labels).mean().item()
-
     return {"acc": acc}
 
 
