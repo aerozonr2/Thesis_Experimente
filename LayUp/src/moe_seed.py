@@ -93,7 +93,7 @@ class MoE_SEED(nn.Module):
             self.finetune_expert(expert_index, train_dataset) 
             choosen_expert_index = expert_index
         
-        print(f"Creating distributions for task {t}:")
+        print(f"Creating distributions for task {t}")
         gmms = self.create_distributions(train_dataset=train_dataset, exp_index=choosen_expert_index)
         for gmm in gmms:
             for expert_index in range(len(self.experts_distributions)):
@@ -223,7 +223,6 @@ class MoE_SEED(nn.Module):
         synthetic_softmaxed_logits = self.predict_class_bayes(features=torch.stack(features, dim=1))
         return synthetic_softmaxed_logits
 
-    @torch.no_grad()
     def choose_expert_to_finetune(self, train_dataset):
         if self.selection_method == 'random':
             return self.selection_random()
@@ -242,7 +241,6 @@ class MoE_SEED(nn.Module):
         # Randomly choose an expert to finetune
         return random.randint(0, self.max_experts - 1)
     
-    @torch.no_grad()
     def selection_euclidean_distance(self, train_dataset):
         # Euclidean distance between the current task distribution and the distributions of the experts
         experts_mean_euclidean_dist = torch.zeros(self.max_experts, device=self.device)
@@ -265,7 +263,6 @@ class MoE_SEED(nn.Module):
         exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
         return exp_to_finetune
 
-    @torch.no_grad()
     def selection_kl_divergence(self, train_dataset):
         # KL divergence between the current task distribution and the distributions of the experts
         experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
@@ -338,7 +335,6 @@ class MoE_SEED(nn.Module):
         exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
         return exp_to_finetune        
 
-    @torch.no_grad()
     def selection_ws_divergence(self, train_dataset):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
         experts_mean_ws_div = torch.zeros(self.max_experts, device=self.device)
@@ -377,8 +373,6 @@ class MoE_SEED(nn.Module):
 
         # Finetune model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
-# GPT für .item() runtime Verbesserung. Dadurch werden die batches küntstlich größer. und ich muss das auch in Train_expert machen. und switch expert!?!
-# als näyhstes nochmal laufen lassen und cprofile vergleichen: --T 10!
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             model.train()
@@ -391,7 +385,6 @@ class MoE_SEED(nn.Module):
             pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
             # Logger.instance().add_backend(TQDMLogger(pbar)) # Ist is LayUp, weiß nicht ob notwendig
             for _, (inputs, labels) in pbar:
-                #bsz = inputs.shape[0]
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 with torch.no_grad():
@@ -502,14 +495,10 @@ class MoE_SEED(nn.Module):
     @torch.no_grad()
     def eval(self):
         self.backbone.eval()
-    
-    @torch.no_grad()
-    def calculate_metrics(self, features, targets, t):
-        pass
-    
-    @torch.no_grad() 
-    def predict_class_bayes(self, features): # Taskoffset und übersezung fehlen noch
-        log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=-1e8, device=features.device)
+
+    def predict_class_bayes(self, features):
+        fill_value = -1e8
+        log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
         # shape: (batch_size, num_experts, num_classes/num_distr. learned by expert one) 
         mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
         for expert_index in range(len(self.experts_distributions)):
@@ -520,11 +509,17 @@ class MoE_SEED(nn.Module):
                 else:
                     log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
                     mask[:, expert_index, c] = True # This class was learned by this expert
-            
-        log_probs = torch.softmax(log_probs/self.tau, dim=2)
-        confidences = torch.sum(log_probs, dim=1) / torch.sum(mask, dim=1)
+        
 
-        return confidences
+        flattened = log_probs.reshape(log_probs.shape[0], -1)
+        filtered = flattened[flattened != fill_value].reshape(log_probs.shape[0], -1)
+
+        log_probs = torch.softmax(filtered/self.tau, dim=1) # tau?
+        padding = (0, self.num_classes - log_probs.shape[1])
+        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs, padding, "constant", 0)
+        
+
+        return synthetic_softmaxed_logits
 
     def criterion(self, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""

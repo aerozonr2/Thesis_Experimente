@@ -207,11 +207,9 @@ def eval_dataset(model, dataset, args):
     for x, y in tqdm(dataloader, desc="Evaluating"):
         x = x.to(args.device)
         y = y.to(args.device)
-
         y_hat = model(x)
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
-    
     
     # Some batches have only one image wich causes a wrong shape
     predictions = [np.expand_dims(pred, axis=0) if pred.ndim == 1 else pred for pred in predictions]
@@ -520,11 +518,10 @@ if __name__ == "__main__":
     setup_logger(args)
 
 
-    #display_profile()
+    #display_profile('cProfile/profile_output3.prof')
     #assert False
     cProfile.run('main(args)', 'cProfile/profile_output3.prof')
     display_profile('cProfile/profile_output2.prof')
     print("#################")
     display_profile('cProfile/profile_output3.prof')
     #main(args)
-    # als nächstes die Methoden die lange dauern mit cProfile direkt untersuchen ?
