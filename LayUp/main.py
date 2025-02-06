@@ -162,6 +162,7 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
     num_samples = {}
     results = {}
     for i, test_dataset in enumerate(data_manager.test_iter(up_to_task)):
+        print(f"########## {i} ##########")
         task_res = eval_dataset(model, test_dataset, args)
         results[i] = task_res
         num_samples[i] = len(test_dataset)
@@ -215,7 +216,12 @@ def eval_dataset(model, dataset, args):
     predictions = [np.expand_dims(pred, axis=0) if pred.ndim == 1 else pred for pred in predictions]
 
     predictions = np.concatenate(predictions, axis=0)
+    print("########## Labels: ##########")
+    print(labels)
+    print(f"len: {[len(i) for i in labels]}")
     labels = np.concatenate(labels, axis=0)
+    print(labels)
+    print("########## END ##########")
     acc = (predictions.argmax(1) == labels).mean().item()
     return {"acc": acc}
 
@@ -327,6 +333,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     model = MoE_SEED(args)
     model.save_backbone_param_names()
     model.num_classes = data_manager.num_classes
+    model.logger = Logger.instance()
     model.add_expert()
     for param_name, _ in model.backbone.named_parameters():
         if param_name not in model.backbone_param_names:
@@ -403,6 +410,16 @@ def main(args):
         train_base_dataset = shrink_dataset(train_base_dataset)
         test_base_dataset = shrink_dataset(test_base_dataset)
         print("Reduced dataset size")
+    else:
+        try:
+            fraction = float(args.reduce_dataset)
+            train_base_dataset = shrink_dataset(train_base_dataset, fraction)
+            test_base_dataset = shrink_dataset(test_base_dataset, fraction)
+            print(f"Reduced dataset size. Fraction {fraction}")
+        except:
+            pass
+
+
 
     # get datamanager based on ds
     data_manager = None
@@ -493,7 +510,7 @@ if __name__ == "__main__":
     parser.add_argument("--reduce_dataset", default="True")
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
-    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="random", choices=["random", "eucld_dist", "kl_div", "ws_div"])
+    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "kl_div", "ws_div"])
     parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) # kommt am ende weg?
     parser.add_argument('--kd', help='Use knowledge distillation', action='store_true', default=False)
 
@@ -517,11 +534,12 @@ if __name__ == "__main__":
 
     setup_logger(args)
 
-
+    # fluent-water-22 und evtl auch jumping-snowball-5
+    # python main.py --moe_max_experts 3 --finetune_epochs 2 --T 50 --wandb_project "Text project" --reduce_dataset 0.15
+    # nxt python main.py --moe_max_experts 3 --finetune_epochs 2 --T 50 --wandb_project "Text project" --dataset limited_domainnet
     #display_profile('cProfile/profile_output3.prof')
     #assert False
     cProfile.run('main(args)', 'cProfile/profile_output3.prof')
-    display_profile('cProfile/profile_output2.prof')
     print("#################")
     display_profile('cProfile/profile_output3.prof')
     #main(args)

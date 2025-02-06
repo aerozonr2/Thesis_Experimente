@@ -55,8 +55,9 @@ class MoE_SEED(nn.Module):
         self.selection_method = args.selection_method
         self.empty_expert = {}
         self.tau = 1.0 # Muss in args rein
-        self.classification = args.classification # average/bayes
+        self.classification = args.classification # average/bayes # Trash
         self.kd = args.kd # muss am ende Weg?
+        self.logger = None
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -92,7 +93,9 @@ class MoE_SEED(nn.Module):
             print(f"Finetuning expert {expert_index} on task {t}:")
             self.finetune_expert(expert_index, train_dataset) 
             choosen_expert_index = expert_index
-        
+
+        self.logger.log({f"Expert {choosen_expert_index} learned task": t})
+
         print(f"Creating distributions for task {t}")
         gmms = self.create_distributions(train_dataset=train_dataset, exp_index=choosen_expert_index)
         for gmm in gmms:
@@ -187,7 +190,7 @@ class MoE_SEED(nn.Module):
         self.backbone.head.to(self.device)
 
     @torch.no_grad()
-    def forward(self, x):
+    def forward_(self, x): # Trash
         if self.classification == 'average':
             return self.forward_average(x)
         elif self.classification == 'bayesian':
@@ -196,7 +199,7 @@ class MoE_SEED(nn.Module):
             raise ValueError('Invalid classification method')
 
     @torch.no_grad()
-    def forward_average(self, x):
+    def forward_average(self, x): # Trash
         features = []
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
@@ -213,7 +216,7 @@ class MoE_SEED(nn.Module):
         return average_logits
 
     @torch.no_grad()
-    def forward_bayes(self, x):
+    def forward(self, x):
         features = []
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
@@ -510,15 +513,16 @@ class MoE_SEED(nn.Module):
                     log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
                     mask[:, expert_index, c] = True # This class was learned by this expert
         
-
+        print("########## Bayes: ##########")
         flattened = log_probs.reshape(log_probs.shape[0], -1)
         filtered = flattened[flattened != fill_value].reshape(log_probs.shape[0], -1)
+        log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1) # tau? x= filtered/self.tau
+        padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
+        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0)
 
-        log_probs = torch.softmax(filtered/self.tau, dim=1) # tau?
-        padding = (0, self.num_classes - log_probs.shape[1])
-        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs, padding, "constant", 0)
-        
-
+        scores = filtered - filtered.max(dim=1, keepdim=True).values
+        print(scores)
+        print("########## END ##########")
         return synthetic_softmaxed_logits
 
     def criterion(self, outputs, targets, features=None, old_features=None):
