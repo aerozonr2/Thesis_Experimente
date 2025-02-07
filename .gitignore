@@ -1,6 +1,7 @@
 *.pth
 *.log
 **/local_data
+**/local_experts
 **/__pycache__
 **/wandb/
 **/results/
@@ -8,4 +9,5 @@
 .venv/
 /data/
 /SEED/
+
 

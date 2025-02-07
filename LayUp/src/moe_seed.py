@@ -221,6 +221,7 @@ class MoE_SEED(nn.Module):
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
             self.backbone.head = nn.Identity()
+            self.backbone.to(self.device)            
             out = self.backbone(x)
             features.append(out)
         synthetic_softmaxed_logits = self.predict_class_bayes(features=torch.stack(features, dim=1))
@@ -538,8 +539,62 @@ class MoE_SEED(nn.Module):
         # Requires_grad = False for all PEFT parameters
         call_in_all_submodules(self.backbone, "freeze", fully=fully)
 
+    def save_experts_to_state_dict(self, destination):
+        state_dict = {}
+        for i, expert in enumerate(self.experts):
+            for name, param in expert.items():
+                state_dict[f"expert_{i}_{name}"] = param
+            state_dict[f"expert_{i}_head"] = self.expert_heads[i]
+        torch.save(state_dict, destination)
+        return state_dict
+
+    def load_experts_from_state_dict(self, state_dict):
+        for i in state_dict.keys():
+            parts = i.split('_')
+            expert_index = int(parts[1])
+            param_name = '_'.join(parts[2:])
+            
+            print("########## Before: ##########")
+            print(f"Expert: {expert_index}")
+            print(f"Param: {param_name}")
+            print(f"Length of experts: {len(self.experts)}")
+            print(f"Length of expert_heads: {len(self.expert_heads)}")
+
+            # Experts does not exist
+            if len(self.experts) <= expert_index or len(self.expert_heads) <= expert_index:
+                self.backbone.head = nn.Identity() # Mismatch between head dimesnions with raw Backbone
+                if param_name == 'head':
+                    # self.expert_heads.append({param_name: state_dict[i]})
+                    self.expert_heads.append(state_dict[i])
+                    print(state_dict[i])
+                    #self.expert_heads[expert_index].load_state_dict(state_dict[i])
+
+                else:
+                    self.experts.append({param_name: state_dict[i]})
+            # Experts already exists
+            else:
+                self.experts[expert_index][param_name] = state_dict[i]
+                self.expert_heads[expert_index] = {param_name: state_dict[i]}
+
+            print("########## After: ##########")
+            print(f"Expert: {expert_index}")
+            print(f"Param: {param_name}")
+            print(f"Length of experts: {len(self.experts)}")
+            print(f"Length of expert_heads: {len(self.expert_heads)}")
+            print("#############################")
+
+
     def get_optimizer(self, num_param, milestones=[60, 120, 160]):
             """Returns the optimizer"""
             optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9) # weight_decay=wd?
             scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
             return optimizer, scheduler
+    
+    def to(self, device=None):
+        if device is None:
+            device = self.device
+        self.backbone.to(device)
+        return self
+    
+    def children(self):
+        return self.backbone.children()

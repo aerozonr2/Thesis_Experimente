@@ -9,11 +9,8 @@ import os
 import cProfile
 import copy
 import time
-
 import wandb
-
 from torch.utils.data import DataLoader
-
 from src.backbone import get_backbone
 from src.modules import CosineLinear
 from src.layup import LayUP
@@ -29,8 +26,21 @@ from src.data import (
 )
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
-
 from src.support_functions import check_gpu_memory, shrink_dataset, display_profile
+
+
+
+
+from xplique.concepts import CraftTorch as Craft
+from xplique.concepts import DisplayImportancesOrder
+from timm.data import resolve_data_config
+from timm.data.transforms_factory import create_transform
+from torchvision import transforms
+
+
+
+
+
 
 
 def set_seed(seed):
@@ -60,102 +70,6 @@ def update_args(args):
     args.target_size = 224
 
     return args
-
-
-def fsa(model, train_dataset, test_dataset, args):
-    model.freeze(fully=False)
-
-    fsa_head = CosineLinear(
-        in_features=model.backbone.num_features,
-        out_features=train_dataset.num_classes,
-        sigma=30,
-    ).to(args.device)
-
-    # set forward to use fsa head (instead of ridge)
-    model.forward = functools.partial(model.forward_with_fsa_head, head=fsa_head)
-
-    optimizer = torch.optim.AdamW(
-        [
-            {"params": model.backbone.parameters()},
-            {"params": fsa_head.parameters()},
-        ],
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.finetune_epochs, eta_min=0.0
-    )
-    scheduler.last_epoch = -1
-
-    dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=2,
-        pin_memory=True,
-    )
-
-    # sanity
-    # print all trainable parameters
-    print("Trainable parameters:")
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(name)
-    for name, param in fsa_head.named_parameters():
-        if param.requires_grad:
-            print("head." + name)
-
-    best_model_state_dict = None
-    best_acc = 0.0
-    epochs_no_improvement = 0
-
-    for epoch in range(args.finetune_epochs):
-        fsa_head.train()
-        model.train()
-        pbar = tqdm(dataloader, desc=f"Finetuning epoch {epoch}")
-        Logger.instance().add_backend(TQDMLogger(pbar))
-        for x, y in pbar:
-            x = x.to(args.device)
-            y = y.to(args.device)
-
-            y_hat = model(x)
-            loss = torch.nn.functional.cross_entropy(y_hat, y)
-            optimizer.zero_grad()
-
-            loss.backward()
-            optimizer.step()
-            Logger.instance().log(
-                {
-                    "loss": loss.item(),
-                    "tacc": (y_hat.argmax(1) == y).float().mean().item(),
-                },
-                blacklist_types=[ConsoleLogger],
-            )
-
-        scheduler.step()
-
-        Logger.instance().pop_backend(TQDMLogger)
-        eval_res = eval_dataset(model, test_dataset, args)
-        acc = eval_res["acc"]
-        eval_res = {"fsa_eval_" + k: v for k, v in eval_res.items()}
-
-        if acc > best_acc:
-            epochs_no_improvement = 0
-            best_acc = acc
-            best_model_state_dict = model.state_dict()
-        else:
-            epochs_no_improvement += 1
-
-        if epochs_no_improvement >= args.early_stopping:
-            break
-
-        Logger.instance().log(eval_res)
-
-    # load best model
-    model.load_state_dict(best_model_state_dict)
-
-    # reset back to ridge forward
-    model.forward = model.forward_with_ridge
 
 
 def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args):
@@ -227,105 +141,7 @@ def eval_dataset(model, dataset, args):
 
 
 def use_layup(data_manager, train_transform, test_transform, args):
-    backbone = get_backbone(args.backbone, finetune_method=args.finetune_method)
-    model = LayUP(
-        backbone=backbone,
-        intralayers=args.intralayers,
-        num_classes=data_manager.num_classes,
-    )
-
-    model.to(args.device)
-    for t, (train_dataset, test_datatset) in enumerate(data_manager):
-        print(f"Task {t}")
-        print(f"Train dataset: {len(train_dataset)}")
-        print(f"Test dataset: {len(test_datatset)}")
-
-        # first session adaptation
-        if t == 0 and args.finetune_method != "none":
-            train_dataset.transform = train_transform
-            fsa(model, train_dataset, test_datatset, args)
-
-        model.freeze(fully=True)
-        model.eval()
-
-        train_dataset.transform = test_transform
-
-        # train Ridge regression
-        model.update_ridge(
-            DataLoader(
-                train_dataset,
-                batch_size=args.batch_size,
-                shuffle=False,
-                num_workers=2,
-                pin_memory=True,
-            )
-        )
-        
-        # eval on all tasks up to t
-        eval_res = eval_datamanager(model, data_manager, t, args)
-        # log results
-        Logger.instance().log(eval_res)
-
-    # Print model summary
-    """
-    Print an organized summary of the important parts of a Vision Transformer.
-    Includes patch embedding, transformer blocks, classification head,
-    parameters, and activation functions.
-    """
-    print("Vision Transformer Summary:")
-    print("=" * 40)
-    '''
-    # Patch embedding layer
-    print("Patch Embedding Layer:")
-    print(model.patch_embed)
-    print("-" * 40)
-    
-    # Transformer blocks
-    print("Transformer Blocks:")
-    for i, block in enumerate(model.blocks):
-        print(f"Block {i + 1}:")
-        print(f"  Attention: {block.attn}")
-        print(f"  MLP: {block.mlp}")
-        
-        # Extract activation functions in the MLP
-        activation_functions = [
-            layer.__class__.__name__ for layer in block.mlp.fc2.children() 
-            if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
-        ]
-        if not activation_functions:  # If no activations are direct children, check deeper
-            activation_functions = [
-                layer.__class__.__name__ for layer in block.mlp.children()
-                if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
-            ]
-        print(f"  Activation Functions: {', '.join(activation_functions) if activation_functions else 'None Found'}")
-    print("-" * 40)
-    
-    # Classification head
-    print("Classification Head:")
-    print(model.head)
-    print("-" * 40)
-    
-    # Parameters summary
-    print("Parameters Summary:")
-    for name, param in model.named_parameters():
-        print(f"{name}: {param.shape}")
-    print("-" * 40)
-    
-    # Activation functions
-    print("Activation Functions:")
-    activations = []
-    def find_activation_functions(module, activations):
-        for child in module.children():
-            if isinstance(child, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh)):
-                activations.append(child.__class__.__name__)
-            else:
-                find_activation_functions(child, activations)
-        return activations
-    
-    activations = find_activation_functions(model)
-    print(", ".join(set(activations)))
-    print("=" * 40)
-    '''
+    pass
 
 
 
@@ -340,6 +156,57 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         if param_name not in model.backbone_param_names:
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
     
+    state_dict = torch.load("local_experts/experts_good.pth")
+    print(state_dict.keys())
+    model.load_experts_from_state_dict(state_dict)
+    print("Experts loaded")
+    
+    
+    model.switch_to_expert(0) # Welcher expert classifiziert die beste classe?
+
+    g = nn.Sequential(*(list(model.children())[:-1])) # input to penultimate layer
+    h = nn.Sequential(*(list(model.children())[-1:])) # penultimate layer to logits
+    # Instanciate CRAFT
+    craft = Craft(input_to_latent_model = g,
+                latent_to_logit_model = h,
+                number_of_concepts = 10,
+                patch_size = 80,
+                batch_size = 64,
+                device = model.device)
+    
+    print(*(list(model.children())[:-1]))
+    print("################")
+    print(*(list(model.children())[-1:]))
+    assert False
+
+    # Keine Ahnung was das ist
+    config = resolve_data_config({}, model=model)
+    transform = create_transform(**config)
+    to_pil = transforms.ToPILImage()
+
+
+
+    rabbit_class = 1 # class with best accuracy
+
+    # loading some images of rabbits !
+    images = np.load('rabbit.npz')['arr_0'].astype(np.uint8)
+    images_preprocessed = torch.stack([transform(to_pil(img)) for img in images], 0)
+
+    images_preprocessed = images_preprocessed.to(model.device)
+
+    print(images_preprocessed.shape)
+
+
+
+
+
+    crops, crops_u, concept_bank_w = \
+    craft.fit(images_preprocessed, class_id=rabbit_class)
+
+    crops.shape, crops_u.shape, concept_bank_w.shape
+
+
+    assert False
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
         train_dataset.transform = train_transform
@@ -356,49 +223,6 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         eval_res = eval_datamanager(model, data_manager, t, args)
         # log results
         Logger.instance().log(eval_res)
-
-    # Save experts
-    print("Saving experts")
-    model.save_experts_to_state_dict("local_experts/experts_good.pth")
-    #model.save_experts_to_state_dict("local_experts/experts_test.pth")
-
-
-        # VPT ist Deep wegen den 12 Layern, Es wird aber nur das erste benutzt. 12 Layer x 10 vpt_prompt_token_num x 768 embed_dim = VTP Tokens
-        # ein experte so viel wie fsa benutzt 10 tokens, nicht 5, wie Kyra das meinte
-        # Ich mache jetzt vpt_type="shallow", dadurch fällt der overhead weg, weil nur ein layer benutzt wird
-        # Trotzdem ist der Experte immer noch doppelt so groß, 10 statt 5 tokens?
-        #  .yml config mit hydra (module)
-        # bayes optim für hyperparameter
-        # gridsearch für alles andere
-
-
-    # Print model summary
-    
-    # VPT                                                           !!!!!!!!! VPT
-    """
-    print(model.backbone.vpt_prompt_tokens) #                            
-    weights_tensor = model.backbone.vpt_prompt_tokens.data
-    # Count the number of weights that are 0
-    num_zeros = torch.sum(weights_tensor == 0).item()
-    # Count the number of weights that are not 0
-    num_non_zeros = torch.sum(weights_tensor != 0).item()
-    print(f"Number of weights that are 0: {num_zeros}")
-    print(f"Number of weights that are not 0: {num_non_zeros}")
-    """
-    # Adapter                                                           !!!!!!!!! Adapter                                   
-    """
-    same_weights = torch.equal(test_adapter_weights, model.backbone.blocks[0].adaptmlp.down_proj.weight)
-    print(f"Initial weights and modified weights are the same: {same_weights}")
-    same_bias = torch.equal(test_adapter_bias, model.backbone.blocks[0].adaptmlp.down_proj.bias)
-    print(f"Initial bias and modified bias are the same: {same_bias}")
-    """
-    # SSF                                                           !!!!!!!!! SSF
-    """
-    same_scale = torch.equal(test_ssf_scale, model.backbone.blocks[0].mlp.fc1_scale)
-    print(f"Initial scale and modified scale are the same: {same_scale}")
-    same_shift = torch.equal(test_ssf_shift, model.backbone.blocks[0].mlp.fc1_shift)
-    print(f"Initial shift and modified shift are the same: {same_shift}")
-    """
 
 
 
@@ -532,12 +356,5 @@ if __name__ == "__main__":
 
     setup_logger(args)
 
-    # fluent-water-22 und evtl auch jumping-snowball-5
-    # python main.py --moe_max_experts 3 --finetune_epochs 2 --T 50 --wandb_project "Text project" --reduce_dataset 0.15
-    # 
-    #display_profile('cProfile/profile_output3.prof')
-    #assert False
-    #cProfile.run('main(args)', 'cProfile/profile_output3.prof')
-    #print("#################")
-    #display_profile('cProfile/profile_output3.prof')
+
     main(args)
