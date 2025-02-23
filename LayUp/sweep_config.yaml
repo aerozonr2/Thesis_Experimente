@@ -1,0 +1,20 @@
+program: main.py
+method: random
+metric:
+  name: task_mean/acc
+  goal: maximize
+parameters:
+  lr:
+    values: [0.001, 0.002, 0.003, 0.005, 0.01]
+  dataset:
+    values: ["cifar100", "imagenetr", "cub", "cddb", "dil_imagenet_r"]
+  finetune_method:
+    values: ["adapter", "ssf", "vpt"]
+  finetune_epochs:
+    values: [1, 2, 3, 4, 5, 10, 15]
+  moe_max_experts:
+    values: [1, 2, 3, 4, 5]
+  reduce_dataset:
+    values: [0.1, 0.15, 0.2, 0.25, 0.5, 1]
+  T:
+    values: [10, 50, 27, 9, 32, 16, 8, 2]

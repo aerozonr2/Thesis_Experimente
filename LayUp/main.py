@@ -354,12 +354,14 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         model.eval()
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
+        print(eval_res)
+        assert eval_res["task_mean/acc"] >= 0.3
         # log results
         Logger.instance().log(eval_res)
 
     # Save experts
-    print("Saving experts")
-    model.save_experts_to_state_dict("local_experts/experts_good.pth")
+    #print("Saving experts")
+    #model.save_experts_to_state_dict("local_experts/experts_good.pth")
     #model.save_experts_to_state_dict("local_experts/experts_test.pth")
 
 

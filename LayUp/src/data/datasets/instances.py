@@ -33,7 +33,7 @@ class ImageNetR(AbstractImageFolder):
         super().__init__(
             root=root,
             train=train,
-            root_folder="imagenetr",
+            root_folder="imagenet-r",
             transform=transform,
             target_transform=target_transform,
             test_subfolder="test",
