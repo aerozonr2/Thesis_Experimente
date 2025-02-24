@@ -18,3 +18,5 @@ parameters:
     values: [0.1, 0.15, 0.2, 0.25, 0.5, 1]
   T:
     values: [10, 50, 27, 9, 32, 16, 8, 2]
+  classification:
+    values: ['average', "bayesian"]
