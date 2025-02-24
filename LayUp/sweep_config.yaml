@@ -7,7 +7,7 @@ parameters:
   lr:
     values: [0.001, 0.002, 0.003, 0.005, 0.01]
   dataset:
-    values: ["cifar100", "imagenetr", "cub", "cddb", "dil_imagenet_r"]
+    values: ["cifar100", "imagenetr", "cub", "cddb", "dil_imagenetr"]
   finetune_method:
     values: ["adapter", "ssf", "vpt"]
   finetune_epochs:
