@@ -157,12 +157,42 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
     
     state_dict = torch.load("local_experts/experts_good.pth")
+    print("state_dict.keys():")
     print(state_dict.keys())
     model.load_experts_from_state_dict(state_dict)
     print("Experts loaded")
     
     
     model.switch_to_expert(0) # Welcher expert classifiziert die beste classe?
+
+    '''
+    for i, e in model.backbone.state_dict().items():
+        print(i)
+        if i == "vpt_prompt_tokens":
+            print(e)
+        print("***")
+
+    assert False
+    '''
+    
+    
+
+    # Model var is changed!
+    model = model.backbone
+    # test ob .children() funktioniert!
+
+
+
+    for i, e in model.named_children():
+        print(i)
+        print(e)
+        print("***")
+    assert False
+
+
+
+
+
 
     g = nn.Sequential(*(list(model.children())[:-1])) # input to penultimate layer
     h = nn.Sequential(*(list(model.children())[-1:])) # penultimate layer to logits
@@ -172,11 +202,16 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
                 number_of_concepts = 10,
                 patch_size = 80,
                 batch_size = 64,
-                device = model.device)
+                device = args.device)
     
-    print(*(list(model.children())[:-1]))
+    #print(*(list(model.children())[:-1]))
+    for i,  in list(model.named_children())[:-1]:
+        print(i)
+        print("***")
+    
+    
+    #print(*(list(model.children())[-1:]))
     print("################")
-    print(*(list(model.children())[-1:]))
     assert False
 
     # Keine Ahnung was das ist

@@ -554,11 +554,13 @@ class MoE_SEED(nn.Module):
             expert_index = int(parts[1])
             param_name = '_'.join(parts[2:])
             
+            '''
             print("########## Before: ##########")
             print(f"Expert: {expert_index}")
             print(f"Param: {param_name}")
             print(f"Length of experts: {len(self.experts)}")
             print(f"Length of expert_heads: {len(self.expert_heads)}")
+            '''
 
             # Experts does not exist
             if len(self.experts) <= expert_index or len(self.expert_heads) <= expert_index:
@@ -566,7 +568,7 @@ class MoE_SEED(nn.Module):
                 if param_name == 'head':
                     # self.expert_heads.append({param_name: state_dict[i]})
                     self.expert_heads.append(state_dict[i])
-                    print(state_dict[i])
+                    #print(state_dict[i])
                     #self.expert_heads[expert_index].load_state_dict(state_dict[i])
 
                 else:
@@ -575,14 +577,14 @@ class MoE_SEED(nn.Module):
             else:
                 self.experts[expert_index][param_name] = state_dict[i]
                 self.expert_heads[expert_index] = {param_name: state_dict[i]}
-
+            '''
             print("########## After: ##########")
             print(f"Expert: {expert_index}")
             print(f"Param: {param_name}")
             print(f"Length of experts: {len(self.experts)}")
             print(f"Length of expert_heads: {len(self.expert_heads)}")
             print("#############################")
-
+            '''
 
     def get_optimizer(self, num_param, milestones=[60, 120, 160]):
             """Returns the optimizer"""
