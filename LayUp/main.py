@@ -12,6 +12,12 @@ import time
 
 import wandb
 
+
+'''
+if torch.cuda.device_count() >= 2:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+'''
+
 from torch.utils.data import DataLoader
 
 from src.backbone import get_backbone
@@ -359,6 +365,17 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         # log results
         Logger.instance().log(eval_res)
 
+    #To Do
+    '''
+    Save der Experten
+    wandb.finish() im logger oder so statt assert false
+    kyra in wandb hinzufügen
+    datensätze runterladen
+    laden der experten für CRAFT: dauert länger
+    sweeps
+    sweep crashes == 50 noch notwenid mit richtigem .finish?
+    '''
+
     # Save experts
     #print("Saving experts")
     #model.save_experts_to_state_dict("local_experts/experts_good.pth")
@@ -533,6 +550,12 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     setup_logger(args)
+
+
+    if torch.cuda.device_count() > 1:
+        print("Specify GPU with: CUDA_VISIBLE_DEVICES=1 python main.py ...")
+        assert False
+
 
     # fluent-water-22 und evtl auch jumping-snowball-5
     # python main.py --moe_max_experts 3 --finetune_epochs 2 --T 50 --wandb_project "Text project" --reduce_dataset 0.15
