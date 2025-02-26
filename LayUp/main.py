@@ -9,6 +9,7 @@ import os
 import cProfile
 import copy
 import time
+import sys
 
 import wandb
 
@@ -361,7 +362,9 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
         print(eval_res)
-        assert eval_res["task_mean/acc"] >= 0.3
+        if float(eval_res["task_mean/acc"]) <= 0.9:
+            Logger.instance().close()
+            sys.exit()
         # log results
         Logger.instance().log(eval_res)
 
@@ -523,8 +526,8 @@ if __name__ == "__main__":
 
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
-    parser.add_argument("--moe_max_experts", type=int, default=2)
-    parser.add_argument("--reduce_dataset", default=0.25, help="Reduce dataset size for faster testing", type=float)
+    parser.add_argument("--moe_max_experts", type=int, default=3)
+    parser.add_argument("--reduce_dataset", default=0.15, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "kl_div", "ws_div"])
@@ -550,11 +553,25 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     setup_logger(args)
+    
 
+    # Provisorisch. Notwentig, damit |classes| mod T = 0
+    dataset_T_values = {
+        "cifar100": [2, 5, 10, 25, 50, 100],
+        "imagenetr": [3, 9, 27],
+        "cub": [2, 4, 8, 16, 32],
+        "cddb": [2],
+        "dil_imagenetr": [3, 9, 27]
+    }
+
+    if args.T not in dataset_T_values[args.dataset]:
+        print(f"Skipping run: dataset={args.dataset}, T={args.T} not valid")
+        wandb.finish(exit_code=0)  # Skip invalid runs
+        exit(0)
 
     if torch.cuda.device_count() > 1:
         print("Specify GPU with: CUDA_VISIBLE_DEVICES=1 python main.py ...")
-        assert False
+        sys.exit()
 
 
     # fluent-water-22 und evtl auch jumping-snowball-5

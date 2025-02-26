@@ -190,7 +190,7 @@ class MoE_SEED(nn.Module):
         self.backbone.head.to(self.device)
 
     @torch.no_grad()
-    def forward_(self, x): # Trash
+    def forward(self, x):
         if self.classification == 'average':
             return self.forward_average(x)
         elif self.classification == 'bayesian':
@@ -216,7 +216,7 @@ class MoE_SEED(nn.Module):
         return average_logits
 
     @torch.no_grad()
-    def forward(self, x):
+    def forward_bayes(self, x):
         features = []
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
@@ -446,7 +446,9 @@ class MoE_SEED(nn.Module):
 
         # Iterate over each class
         unique_labels = all_labels.unique()
-        for class_label in unique_labels:
+
+        pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
+        for _, class_label in pbar:
             # Get all images of the class
             class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
             class_images = all_images[class_indices]
@@ -514,7 +516,7 @@ class MoE_SEED(nn.Module):
                     log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
                     mask[:, expert_index, c] = True # This class was learned by this expert
         
-        print("########## Bayes: ##########")
+        #print("########## Bayes: ##########")
         flattened = log_probs.reshape(log_probs.shape[0], -1)
         filtered = flattened[flattened != fill_value].reshape(log_probs.shape[0], -1)
         log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1) # tau? x= filtered/self.tau
@@ -522,8 +524,8 @@ class MoE_SEED(nn.Module):
         synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0)
 
         scores = filtered - filtered.max(dim=1, keepdim=True).values
-        print(scores)
-        print("########## END ##########")
+        #print(scores)
+        #print("########## END ##########")
         return synthetic_softmaxed_logits
 
     def criterion(self, outputs, targets, features=None, old_features=None):
