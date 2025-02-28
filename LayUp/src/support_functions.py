@@ -1,6 +1,12 @@
 import torch 
 from torch.utils.data import Subset
 import pstats
+import subprocess
+import csv
+import os
+from datetime import datetime
+import time
+import json
 '''
 print(torch.version.cuda)  # Shows the CUDA version PyTorch was built with
 print(torch.backends.cudnn.version())  # Shows the cuDNN version
@@ -73,6 +79,61 @@ def move_large_tensor_to_gpu():
     # Print the tensor's shape and its device
     print(f"Tensor shape: {tensor.shape}")
     print(f"Tensor is on device: {tensor.device}")
+
+
+def log_gpustat(log_dir="local_logs", log_file="gpustat_log.csv"):
+    try:
+        # Create the directory if it doesn't exist
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        # Specify the full path to the log file
+        log_path = os.path.join(log_dir, log_file)
+
+        # Run gpustat and capture the output
+        result = subprocess.run(["gpustat", "--json"], capture_output=True, text=True, check=True)
+        
+        # Parse JSON output
+        data = json.loads(result.stdout)
+        
+        # Extract relevant information
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        gpu_data = []
+        for gpu in data["gpus"]:
+            if gpu["index"] == 2:
+                continue
+            gpu_info = {
+                "Time": timestamp,
+                "GPU ID": gpu["index"],
+                "GPU Name": gpu["name"],
+                "Temperature (°C)": gpu["temperature.gpu"],
+                "Memory Used (MB)": gpu["memory.used"],
+                "Memory Total (MB)": gpu["memory.total"],
+                "GPU Utilization (%)": gpu["utilization.gpu"],
+                "Power Draw (W)": gpu["power.draw"],
+            }
+            gpu_data.append(gpu_info)
+
+        # Check if file exists
+        file_exists = os.path.exists(log_path)
+        
+        # Log data to CSV
+        with open(log_path, mode="a", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=gpu_data[0].keys())
+
+            # Write header if the file is new
+            if not file_exists:
+                writer.writeheader()
+
+            # Write GPU data
+            for gpu_info in gpu_data:
+                writer.writerow(gpu_info)
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error running gpustat: {e}")
+    except json.JSONDecodeError as e:
+        print(f"Error parsing gpustat output: {e}")
+
 
 if __name__ == "__main__":
     pass

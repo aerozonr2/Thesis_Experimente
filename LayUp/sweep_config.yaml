@@ -9,7 +9,7 @@ parameters:
   dataset:
     values: ["cifar100", "imagenetr", "cub", "cddb", "dil_imagenetr"]
   finetune_method:
-    values: ["vpt"] # andere Meethoden fehlen
+    values: ["vpt", "adapter"] # ssf fehlt noch und funktioniert auch noch nicht
   finetune_epochs:
     values: [1, 2, 3, 4, 5, 10, 15]
   moe_max_experts:

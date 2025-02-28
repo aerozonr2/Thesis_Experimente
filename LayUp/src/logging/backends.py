@@ -47,9 +47,6 @@ class WandbLogger(LoggerBackend):
         )
 
     def log(self, log_dict):
-        print("Logging to")
-        print(log_dict)
-        print("#######")
         wandb.log(log_dict)
 
     def close(self):

@@ -99,6 +99,7 @@ def _convert_single_module(
 
     # Create a new instance with the same parameters
     ##
+    '''
     print("++++++++++")
     print("cls:")
     print(cls) # <class 'src.backbone.ssf.SSFVisionTransformer'>
@@ -115,6 +116,7 @@ def _convert_single_module(
     
     print("**********")
     #exit(0)
+    '''
     ##
     new_module, info = load_from_extended_state_dict(
         cls, state_dict, strict=False, **kwargs

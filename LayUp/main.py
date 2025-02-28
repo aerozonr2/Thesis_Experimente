@@ -10,6 +10,9 @@ import cProfile
 import copy
 import time
 import sys
+import json
+import subprocess
+
 
 import wandb
 
@@ -37,7 +40,7 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
-from src.support_functions import check_gpu_memory, shrink_dataset, display_profile
+from src.support_functions import check_gpu_memory, shrink_dataset, display_profile, log_gpustat
 
 
 def set_seed(seed):
@@ -169,7 +172,7 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
     num_samples = {}
     results = {}
     for i, test_dataset in enumerate(data_manager.test_iter(up_to_task)):
-        print(f"########## {i} ##########")
+        #print(f"########## {i} ##########")
         task_res = eval_dataset(model, test_dataset, args)
         results[i] = task_res
         num_samples[i] = len(test_dataset)
@@ -353,12 +356,16 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
+        if args.log_gpustat:
+            log_gpustat()
         train_dataset.transform = train_transform
         print(f"# Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
+        if args.log_gpustat:
+            log_gpustat()
         
 
         # eval on all tasks up to t
@@ -366,11 +373,13 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
         print(eval_res)
+        if args.log_gpustat:
+            log_gpustat()
         # log results
         Logger.instance().log(eval_res)
 
-        
-        if float(eval_res["task_mean/acc"]) <= 0.3:
+
+        if float(eval_res["task_mean/acc"]) <= 0.1:
             wandb_finish()
             sys.exit()
 
@@ -540,6 +549,7 @@ if __name__ == "__main__":
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "kl_div", "ws_div"])
     parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) # kommt am ende weg?
     parser.add_argument('--kd', help='Use knowledge distillation', action='store_true', default=False)
+    parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -562,7 +572,6 @@ if __name__ == "__main__":
     setup_logger(args)
     
 
-
     Logger.instance().add_backend(
             WandbLogger(args.wandb_project, args.wandb_entity, args)
         )
@@ -582,7 +591,7 @@ if __name__ == "__main__":
         exit(0)
 
     if torch.cuda.device_count() > 1:
-        print("Specify GPU with: CUDA_VISIBLE_DEVICES=1 python main.py ...")
+        print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py ...")
         sys.exit()
 
 
