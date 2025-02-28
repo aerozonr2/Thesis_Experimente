@@ -4,11 +4,11 @@
 **/local_experts
 **/local_logs
 **/__pycache__
+*.pyc
 **/wandb/
 **/results/
 /LayUp/cProfile/
 .venv/
 /data/
 /SEED/
-
 

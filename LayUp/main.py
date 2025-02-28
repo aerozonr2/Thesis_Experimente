@@ -566,7 +566,7 @@ if __name__ == "__main__":
     Logger.instance().add_backend(
             WandbLogger(args.wandb_project, args.wandb_entity, args)
         )
-
+    
     # Provisorisch. Notwentig, damit |classes| mod T = 0
     dataset_T_values = {
         "cifar100": [2, 5, 10, 25, 50, 100],
