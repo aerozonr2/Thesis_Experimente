@@ -1,7 +1,7 @@
 program: main.py
 method: grid
 metric:
-  name: task_mean/acc
+  name: 'task_mean/acc'
   goal: maximize
 parameters:
   lr:

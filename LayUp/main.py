@@ -223,12 +223,12 @@ def eval_dataset(model, dataset, args):
     predictions = [np.expand_dims(pred, axis=0) if pred.ndim == 1 else pred for pred in predictions]
 
     predictions = np.concatenate(predictions, axis=0)
-    print("########## Labels: ##########")
-    print(labels)
-    print(f"len: {[len(i) for i in labels]}")
+    #print("########## Labels: ##########")
+    #print(labels)
+    #print(f"len: {[len(i) for i in labels]}")
     labels = np.concatenate(labels, axis=0)
-    print(labels)
-    print("########## END ##########")
+    #print(labels)
+    #print("########## END ##########")
     acc = (predictions.argmax(1) == labels).mean().item()
     return {"acc": acc}
 
@@ -335,6 +335,10 @@ def use_layup(data_manager, train_transform, test_transform, args):
     '''
 
 
+def wandb_finish():
+    print(Logger.instance()._backends)
+    ## Bei Sweep wird kein wandb Logger erstellt -> es werden keine metriken an wandb gesendet
+    Logger.instance()._backends[1].close()
 
 def use_moe(data_manager, train_transform, test_transform, args): # test_transform muss noch integriert werden
     model = MoE_SEED(args)
@@ -362,8 +366,8 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
         print(eval_res)
-        if float(eval_res["task_mean/acc"]) <= 0.9:
-            Logger.instance().close()
+        if float(eval_res["task_mean/acc"]) <= 0.3:
+            wandb_finish()
             sys.exit()
         # log results
         Logger.instance().log(eval_res)
@@ -566,7 +570,7 @@ if __name__ == "__main__":
 
     if args.T not in dataset_T_values[args.dataset]:
         print(f"Skipping run: dataset={args.dataset}, T={args.T} not valid")
-        wandb.finish(exit_code=0)  # Skip invalid runs
+        wandb_finish()
         exit(0)
 
     if torch.cuda.device_count() > 1:
@@ -583,3 +587,7 @@ if __name__ == "__main__":
     #print("#################")
     #display_profile('cProfile/profile_output3.prof')
     main(args)
+    try:
+        wandb_finish()
+    except:
+        print("Logger already closed")
