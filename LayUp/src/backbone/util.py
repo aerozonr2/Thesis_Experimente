@@ -98,6 +98,24 @@ def _convert_single_module(
     #     kwargs["bias"] = module.bias is not None
 
     # Create a new instance with the same parameters
+    ##
+    print("++++++++++")
+    print("cls:")
+    print(cls) # <class 'src.backbone.ssf.SSFVisionTransformer'>
+    
+    print("state_dict:")
+    print(f"len: {len(state_dict)}")
+    print(state_dict.keys()) # dict_keys(['state_dict', 'config'])
+    print("state_dict['config']:") # dict_keys(['img_size', 'patch_size', 'in_chans', 'embed_dim', 'num_heads', 'mlp_ratio', 'qk_scale', 'drop_rate', 'attn_drop_rate', 'drop_path_rate', 'norm_layer', 'act_layer', 'mlp_layer', 'ssfs'])
+    print(state_dict['config'].keys())
+    #print(state_dict.items())
+    
+    print("kwargs:")
+    print(kwargs) # empty
+    
+    print("**********")
+    #exit(0)
+    ##
     new_module, info = load_from_extended_state_dict(
         cls, state_dict, strict=False, **kwargs
     )
