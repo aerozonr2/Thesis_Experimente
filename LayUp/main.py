@@ -336,8 +336,8 @@ def use_layup(data_manager, train_transform, test_transform, args):
 
 
 def wandb_finish():
-    print(Logger.instance()._backends)
-    ## Bei Sweep wird kein wandb Logger erstellt -> es werden keine metriken an wandb gesendet
+    # Bei Sweep wird kein wandb Logger erstellt -> es werden keine metriken an wandb gesendet
+    # wandb logger muss manuell hinzu gefügt werden
     Logger.instance()._backends[1].close()
 
 def use_moe(data_manager, train_transform, test_transform, args): # test_transform muss noch integriert werden
@@ -366,11 +366,14 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
         print(eval_res)
+        # log results
+        Logger.instance().log(eval_res)
+
+        
         if float(eval_res["task_mean/acc"]) <= 0.3:
             wandb_finish()
             sys.exit()
-        # log results
-        Logger.instance().log(eval_res)
+
 
     #To Do
     '''
@@ -559,6 +562,11 @@ if __name__ == "__main__":
     setup_logger(args)
     
 
+
+    Logger.instance().add_backend(
+            WandbLogger(args.wandb_project, args.wandb_entity, args)
+        )
+
     # Provisorisch. Notwentig, damit |classes| mod T = 0
     dataset_T_values = {
         "cifar100": [2, 5, 10, 25, 50, 100],
@@ -589,5 +597,6 @@ if __name__ == "__main__":
     main(args)
     try:
         wandb_finish()
+        print("WandB finished")
     except:
         print("Logger already closed")

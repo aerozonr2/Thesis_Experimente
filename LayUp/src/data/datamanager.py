@@ -107,6 +107,7 @@ class CILDataManager:
             self.num_classes_per_task.insert(0, num_first_task)
 
         # sanity check
+        '''
         print("Sanity check 1")
         print(f"Num classes: {self.num_classes}")
         print(f"Num classes per task: {self.num_classes_per_task}")
@@ -114,7 +115,7 @@ class CILDataManager:
         print(f"Sum classes per task: {sum(self.num_classes_per_task)}")
         print(f"T: {T}")
         print("####################")
-
+        '''
         assert sum(self.num_classes_per_task) == self.num_classes
         assert len(self.num_classes_per_task) == T
 
@@ -145,6 +146,7 @@ class CILDataManager:
             self.test_indices_per_task.append(test_indices)
 
         # sanity check
+        '''
         print("Sanity check 2")
         print(f"Train indices per task: {len(self.train_indices_per_task)}")
         print(f"Test indices per task: {len(self.test_indices_per_task)}")
@@ -152,7 +154,7 @@ class CILDataManager:
         print(f"{sum(len(indices) for indices in self.test_indices_per_task)} == {len(self.test_dataset)}")
         print(f"Len of each test_indices_per_task {[len(i) for i in self.test_indices_per_task]}")
         print("####################")
-
+        '''
         assert len(self.train_indices_per_task) == T
         assert len(self.test_indices_per_task) == T
         assert (

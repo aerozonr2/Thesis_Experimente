@@ -1,5 +1,5 @@
 program: main.py
-method: grid
+method: random
 metric:
   name: 'task_mean/acc'
   goal: maximize
@@ -9,7 +9,7 @@ parameters:
   dataset:
     values: ["cifar100", "imagenetr", "cub", "cddb", "dil_imagenetr"]
   finetune_method:
-    values: ["adapter", "ssf", "vpt"]
+    values: ["vpt"] # andere Meethoden fehlen
   finetune_epochs:
     values: [1, 2, 3, 4, 5, 10, 15]
   moe_max_experts:
@@ -17,7 +17,7 @@ parameters:
   reduce_dataset:
     values: [0.1, 0.15, 0.2, 0.25, 0.5, 1]
   T:
-    values: [2, 3, 4, 5, 8, 9, 10, 16, 27, 32, 50, 100]
+    values: [2, 3, 4, 5, 8, 9, 10, 16, 27, 32, 50, 100] # 2, 3, 4, 5, 8, 9, 10, 16, 27, 32, 50, 100
   classification:
     values: ['average', "bayesian"]
   backbone:
