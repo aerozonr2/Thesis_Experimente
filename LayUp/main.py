@@ -379,21 +379,11 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         Logger.instance().log(eval_res)
 
 
-        if float(eval_res["task_mean/acc"]) <= 0.1:
+        if float(eval_res["task_mean/acc"]) <= 0.3:
             wandb_finish()
             sys.exit()
 
 
-    #To Do
-    '''
-    Save der Experten
-    wandb.finish() im logger oder so statt assert false
-    kyra in wandb hinzufügen
-    datensätze runterladen
-    laden der experten für CRAFT: dauert länger
-    sweeps
-    sweep crashes == 50 noch notwenid mit richtigem .finish?
-    '''
 
     # Save experts
     #print("Saving experts")
@@ -584,14 +574,22 @@ if __name__ == "__main__":
         "cddb": [2],
         "dil_imagenetr": [3, 9, 27]
     }
-
+    '''
     if args.T not in dataset_T_values[args.dataset]:
         print(f"Skipping run: dataset={args.dataset}, T={args.T} not valid")
         wandb_finish()
         exit(0)
+    '''
+
+    # Cifar100 wird zu oft gemacht
+    if args.dataset == "cifar100":
+        print(f"Skipping run: dataset={args.dataset}, should not be used")
+        wandb_finish()
+        exit(0)
+    
 
     if torch.cuda.device_count() > 1:
-        print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py ...")
+        print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py --...")
         sys.exit()
 
 

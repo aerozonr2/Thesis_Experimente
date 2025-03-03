@@ -156,63 +156,64 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         if param_name not in model.backbone_param_names:
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
     
-    state_dict = torch.load("local_experts/experts_good.pth")
+    '''
+    backbone = model.backbone.state_dict()
+    print("backbone parameter names:")
+    print([i for i, e in backbone.items()])
+
+    print("shape of vprompt_tokens:")
+    print(backbone["vpt_prompt_tokens"].shape)
+
+    print("memory of vprompt_tokens:")
+    print(backbone["vpt_prompt_tokens"])
+    print("##################")
+    print("\n")
+    ''' 
+    
+    # Load experts
+    print("Loading experts")
+    state_dict = torch.load("local_experts/experts_test.pth")
     print("state_dict.keys():")
     print(state_dict.keys())
     model.load_experts_from_state_dict(state_dict)
     print("Experts loaded")
     
     
-    model.switch_to_expert(0) # Welcher expert classifiziert die beste classe?
+    model.switch_to_expert(2) # Welcher expert classifiziert die beste classe?
+
+
+
+    # nodel vr is changed
+    model = model.backbone.to(args.device)
+    model.device = args.device
 
     '''
-    for i, e in model.backbone.state_dict().items():
-        print(i)
-        if i == "vpt_prompt_tokens":
-            print(e)
-        print("***")
+    print("EXPERT 2:")
+    print("backbone parameter names:")
+    print([i for i, _ in model.state_dict().items()])
 
-    assert False
+    print("shape of vprompt_tokens:")
+    print(model.state_dict()["vpt_prompt_tokens"].shape)
+
+    print("memory of vprompt_tokens:")
+    print(model.state_dict()["vpt_prompt_tokens"])
+    print("##################")
+    print("\n")
     '''
-    
-    
-
-    # Model var is changed!
-    model = model.backbone
-    # test ob .children() funktioniert!
-
-
-
-    for i, e in model.named_children():
-        print(i)
-        print(e)
-        print("***")
-    assert False
-
-
-
-
-
 
     g = nn.Sequential(*(list(model.children())[:-1])) # input to penultimate layer
     h = nn.Sequential(*(list(model.children())[-1:])) # penultimate layer to logits
+        # Add ReLU activation to ensure non-negative activations
+    g.add_module("relu", nn.ReLU())# 
+
     # Instanciate CRAFT
     craft = Craft(input_to_latent_model = g,
                 latent_to_logit_model = h,
                 number_of_concepts = 10,
                 patch_size = 80,
-                batch_size = 64,
+                batch_size = 32,
                 device = args.device)
     
-    #print(*(list(model.children())[:-1]))
-    for i,  in list(model.named_children())[:-1]:
-        print(i)
-        print("***")
-    
-    
-    #print(*(list(model.children())[-1:]))
-    print("################")
-    assert False
 
     # Keine Ahnung was das ist
     config = resolve_data_config({}, model=model)
@@ -221,44 +222,61 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
 
 
 
-    rabbit_class = 1 # class with best accuracy
+    # Extract images and labels for the first two classes
+    first_two_classes = [0, 1]
+    images_class_0 = []
+    class0_id = 0
+    images_class_1 = []
+    for idx, (train_dataset, _) in enumerate(data_manager):
+        if idx in first_two_classes:
+            for img, label in train_dataset:
+                if label == 0:
+                    images_class_0.append(img)
+                elif label == 1:
+                    images_class_1.append(img)
+        if idx >= 0: # change for more classes. But you have to initiate the arrays first
+            break
+
+    # Convert images to tensors before applying transform
+    images_class_0 = [transforms.ToTensor()(img) for img in images_class_0]
+    images_class_1 = [transforms.ToTensor()(img) for img in images_class_1]
+
+    # loading some images of ? !
+    images = images_class_0
+    images_preprocessed = torch.stack([transform(to_pil(img)) for img in images], 0)
+    images_preprocessed = images_preprocessed.to(model.device)
+    print("Images shape:")
+    print(images_preprocessed.shape)
+
+    '''
+    #
+    #
+    #
+    device = args.device
+    rabbit_class = 330 # imagenet class for rabbit
 
     # loading some images of rabbits !
     images = np.load('rabbit.npz')['arr_0'].astype(np.uint8)
     images_preprocessed = torch.stack([transform(to_pil(img)) for img in images], 0)
 
-    images_preprocessed = images_preprocessed.to(model.device)
-
-    print(images_preprocessed.shape)
-
-
-
-
-
+    images_preprocessed = images_preprocessed.to(device)
+    print("++++++++++++++++")
     crops, crops_u, concept_bank_w = \
     craft.fit(images_preprocessed, class_id=rabbit_class)
 
-    crops.shape, crops_u.shape, concept_bank_w.shape
+    print(crops.shape, crops_u.shape, concept_bank_w.shape)
+    exit(0)
+    #
+    #
+    #
+    '''
+    crops, crops_u, concept_bank_w = \
+    craft.fit(images_preprocessed, class_id=class0_id)
+
+    print(crops.shape, crops_u.shape, concept_bank_w.shape)
 
 
-    assert False
-    # Trainloop for all tasks
-    for t, (train_dataset, test_datatset) in enumerate(data_manager): 
-        train_dataset.transform = train_transform
-        print(f"# Task {t}")
-        print(f"Train dataset: {len(train_dataset)}")
-        print(f"Test dataset: {len(test_datatset)}")
-        train_dataset.transform = train_transform
-        model.train_loop(t=t, train_dataset=train_dataset)
-        
-
-        # eval on all tasks up to t
-        model.eval()
-        model.freeze(fully=True)
-        eval_res = eval_datamanager(model, data_manager, t, args)
-        # log results
-        Logger.instance().log(eval_res)
-
+    exit(0)
 
 
 def main(args):
@@ -331,7 +349,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset", type=str, default="cifar100", choices=DATASET_MAP.keys()
     )
-    parser.add_argument("--T", type=int, default=10)
+    parser.add_argument("--T", type=int, default=50)
 
     # model
     parser.add_argument(
@@ -391,5 +409,5 @@ if __name__ == "__main__":
 
     setup_logger(args)
 
-
+    print("T = 50")
     main(args)

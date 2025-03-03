@@ -157,7 +157,6 @@ class MoE_SEED(nn.Module):
             running_loss = 0.0
             num_train_loader = len(train_loader)
             pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
-            # Logger.instance().add_backend(TQDMLogger(pbar)) # Ist is LayUp, weiß nicht ob notwendig
             for _, (inputs, labels) in pbar:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
