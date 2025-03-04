@@ -248,6 +248,8 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     print("Images shape:")
     print(images_preprocessed.shape)
 
+    
+    # to do: PEFT parameter scalieren nach anzahl der experten
     '''
     #
     #

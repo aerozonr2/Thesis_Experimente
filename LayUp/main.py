@@ -339,9 +339,10 @@ def use_layup(data_manager, train_transform, test_transform, args):
 
 
 def wandb_finish():
-    # Bei Sweep wird kein wandb Logger erstellt -> es werden keine metriken an wandb gesendet
-    # wandb logger muss manuell hinzu gefügt werden
-    Logger.instance()._backends[1].close()
+    if len(Logger.instance()._backends) > 1 and isinstance(Logger.instance()._backends[1], WandbLogger):
+        Logger.instance()._backends[1].close()
+    else:
+        print("No wandb logger to close")
 
 def use_moe(data_manager, train_transform, test_transform, args): # test_transform muss noch integriert werden
     model = MoE_SEED(args)
@@ -378,8 +379,8 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         # log results
         Logger.instance().log(eval_res)
 
-
-        if float(eval_res["task_mean/acc"]) <= 0.3:
+        # Early stopping if accuracy is too low
+        if float(eval_res["task_mean/acc"]) <= 0.50:
             wandb_finish()
             sys.exit()
 
@@ -395,7 +396,6 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         # ein experte so viel wie fsa benutzt 10 tokens, nicht 5, wie Kyra das meinte
         # Ich mache jetzt vpt_type="shallow", dadurch fällt der overhead weg, weil nur ein layer benutzt wird
         # Trotzdem ist der Experte immer noch doppelt so groß, 10 statt 5 tokens?
-        #  .yml config mit hydra (module)
         # bayes optim für hyperparameter
         # gridsearch für alles andere
 
@@ -540,6 +540,7 @@ if __name__ == "__main__":
     parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) # kommt am ende weg?
     parser.add_argument('--kd', help='Use knowledge distillation', action='store_true', default=False)
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
+    parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -561,41 +562,30 @@ if __name__ == "__main__":
 
     setup_logger(args)
     
-
-    Logger.instance().add_backend(
-            WandbLogger(args.wandb_project, args.wandb_entity, args)
-        )
+    if args.sweep_logging:
+        Logger.instance().add_backend(
+                WandbLogger(args.wandb_project, args.wandb_entity, args)
+            )
     
-    # Provisorisch. Notwentig, damit |classes| mod T = 0
-    dataset_T_values = {
-        "cifar100": [2, 5, 10, 25, 50, 100],
-        "imagenetr": [3, 9, 27],
-        "cub": [2, 4, 8, 16, 32],
-        "cddb": [2],
-        "dil_imagenetr": [3, 9, 27]
-    }
-    '''
-    if args.T not in dataset_T_values[args.dataset]:
-        print(f"Skipping run: dataset={args.dataset}, T={args.T} not valid")
+
+    if args.dataset == "vtab" and args.T > 50:
+        print(f"Skipping run: dataset={args.dataset}, T={args.T} is too large")
         wandb_finish()
         exit(0)
     '''
-
     # Cifar100 wird zu oft gemacht
     if args.dataset == "cifar100":
         print(f"Skipping run: dataset={args.dataset}, should not be used")
         wandb_finish()
         exit(0)
-    
+    '''
 
     if torch.cuda.device_count() > 1:
         print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py --...")
         sys.exit()
 
 
-    # fluent-water-22 und evtl auch jumping-snowball-5
-    # python main.py --moe_max_experts 3 --finetune_epochs 2 --T 50 --wandb_project "Text project" --reduce_dataset 0.15
-    # 
+
     #display_profile('cProfile/profile_output3.prof')
     #assert False
     #cProfile.run('main(args)', 'cProfile/profile_output3.prof')
