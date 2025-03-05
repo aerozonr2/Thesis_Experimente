@@ -231,10 +231,16 @@ class MoE_SEED(nn.Module):
             return self.selection_random()
         elif self.selection_method == 'eucld_dist':
             return self.selection_euclidean_distance(train_dataset)
+        elif self.selection_method == 'inv_eucld_dist':
+            return self.selection_euclidean_distance(train_dataset, inverted=True)
         elif self.selection_method == 'kl_div':
             return self.selection_kl_divergence(train_dataset)
+        elif self.selection_method == 'inv_kl_div':
+            return self.selection_kl_divergence(train_dataset, inverted=True)
         elif self.selection_method == 'ws_div':
             return self.selection_ws_divergence(train_dataset)
+        elif self.selection_method == 'inv_ws_div':
+            return self.selection_ws_divergence(train_dataset, inverted=True)
         else:
             raise ValueError('Invalid selection method')
         # muss man bei beiden Divergenzen .argmin() oder .argmax() am Ende nehmen? In SEED wird bei KL Divergenz .argmax() genommen, aber was ist mit Wasserstein?
@@ -244,7 +250,7 @@ class MoE_SEED(nn.Module):
         # Randomly choose an expert to finetune
         return random.randint(0, self.max_experts - 1)
     
-    def selection_euclidean_distance(self, train_dataset):
+    def selection_euclidean_distance(self, train_dataset, inverted=False):
         # Euclidean distance between the current task distribution and the distributions of the experts
         experts_mean_euclidean_dist = torch.zeros(self.max_experts, device=self.device)
 
@@ -263,10 +269,13 @@ class MoE_SEED(nn.Module):
                     euclidean_matrix[n, o] = euclidean_dist
 
             experts_mean_euclidean_dist[expert_index] = torch.mean(euclidean_matrix)
-        exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
+        if inverted:
+            exp_to_finetune = torch.argmin(experts_mean_euclidean_dist)
+        else:
+            exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
         return exp_to_finetune
 
-    def selection_kl_divergence(self, train_dataset):
+    def selection_kl_divergence(self, train_dataset, inverted=False):
         # KL divergence between the current task distribution and the distributions of the experts
         experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
 
@@ -335,10 +344,13 @@ class MoE_SEED(nn.Module):
                     kl_matrix[n, o] = kl_div
 
             experts_mean_kl_div[expert_index] = torch.mean(kl_matrix)
-        exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
+        if inverted:
+            exp_to_finetune = torch.argmin(experts_mean_kl_div)
+        else:
+            exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
         return exp_to_finetune        
 
-    def selection_ws_divergence(self, train_dataset):
+    def selection_ws_divergence(self, train_dataset, inverted=False):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
         experts_mean_ws_div = torch.zeros(self.max_experts, device=self.device)
 
@@ -357,7 +369,10 @@ class MoE_SEED(nn.Module):
                     ws_matrix[n, o] = ws_div
 
             experts_mean_ws_div[expert_index] = torch.mean(ws_matrix)
-        exp_to_finetune = torch.argmax(experts_mean_ws_div)  # Choose expert with the lowest Wasserstein divergence
+        if inverted:
+            exp_to_finetune = torch.argmin(experts_mean_ws_div)
+        else:
+            exp_to_finetune = torch.argmax(experts_mean_ws_div)  # Choose expert with the lowest Wasserstein divergence
         return exp_to_finetune
 
     def finetune_expert(self, expert_index, train_dataset):

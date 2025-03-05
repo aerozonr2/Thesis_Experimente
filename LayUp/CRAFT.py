@@ -1,3 +1,5 @@
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import argparse
 import random
 import torch
@@ -10,6 +12,7 @@ import cProfile
 import copy
 import time
 import wandb
+import timm
 from torch.utils.data import DataLoader
 from src.backbone import get_backbone
 from src.modules import CosineLinear
@@ -144,67 +147,129 @@ def use_layup(data_manager, train_transform, test_transform, args):
     pass
 
 
+class CustomModuleN_to_2048(nn.Module):
+    def __init__(self, output_dim=2048, device="cuda"):
+        super(CustomModuleN_to_2048, self).__init__()
+        self.output_dim = output_dim
+        self.device = device
+        self.fc = nn.Linear(1, output_dim).to(device)  # Initialize with dummy input size
+        self.relu = nn.ReLU().to(device)  # Add ReLU activation
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)  # Flatten the input tensor
+        input_dim = x.size(1)
+        if self.fc.in_features != input_dim:
+            self.fc = nn.Linear(input_dim, self.output_dim).to(self.device)  # Reinitialize with correct input size
+        x = self.fc(x)
+        x = self.relu(x)  # Apply ReLU activation
+
+        # Check if all values are positive
+        if not torch.all(x >= 0):
+            print("Warning: Some values are not positive")
+
+        return x
+
+class AddMinValue(nn.Module):
+    def __init__(self, device="cuda"):
+        super(AddMinValue, self).__init__()
+        self.device = device
+
+    def forward(self, x):
+        min_value = torch.min(x)
+        x = x + min_value
+        return x
+
+def craft_switch_models(model, moe_model, device):
+    print("\n######## START ##########\n")
+    
+    print("EXPERT 2:")
+    print([i for i, _ in moe_model.named_children()])
+    for name, param in moe_model.named_children():
+        if name == "blocks":
+            print(f"blocks: {param[0]}")
+        else:
+            print(f"{name}: {param}")
+    print("\n")
+    
+    #begining = nn.Sequential(moe_model.patch_embed, moe_model.pos_drop)
+
+    model.stem = moe_model.patch_embed
+    model.stages = moe_model.blocks
+    
+    model.head = nn.Linear(2048, 100)
+    model.final_conv = CustomModuleN_to_2048()
+    model.final_act = nn.Identity()
+    
+    model.to(device)
+
+    print("RESNET50:")
+    print([i for i, _ in model.named_children()])
+    for name, param in model.named_children():
+        if name == "stages":
+            print(f"stages: many")
+        else:
+            print(f"{name}: {param}")
+
+
+    print("\n######## END ##########\n")
+
+    return model
+
+
+
+
 
 def use_moe(data_manager, train_transform, test_transform, args): # test_transform muss noch integriert werden
-    model = MoE_SEED(args)
-    model.save_backbone_param_names()
-    model.num_classes = data_manager.num_classes
-    model.logger = Logger.instance()
-    model.add_expert()
+    moe_model = MoE_SEED(args)
+    moe_model.save_backbone_param_names()
+    moe_model.num_classes = data_manager.num_classes
+    moe_model.logger = Logger.instance()
+    moe_model.add_expert()
 
-    for param_name, _ in model.backbone.named_parameters():
-        if param_name not in model.backbone_param_names:
-            model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
+    for param_name, _ in moe_model.backbone.named_parameters():
+        if param_name not in moe_model.backbone_param_names:
+            moe_model.empty_expert[param_name] = copy.deepcopy(moe_model.backbone.state_dict()[param_name])
     
-    '''
-    backbone = model.backbone.state_dict()
-    print("backbone parameter names:")
-    print([i for i, e in backbone.items()])
-
-    print("shape of vprompt_tokens:")
-    print(backbone["vpt_prompt_tokens"].shape)
-
-    print("memory of vprompt_tokens:")
-    print(backbone["vpt_prompt_tokens"])
-    print("##################")
-    print("\n")
-    ''' 
     
     # Load experts
     print("Loading experts")
     state_dict = torch.load("local_experts/experts_test.pth")
-    print("state_dict.keys():")
     print(state_dict.keys())
-    model.load_experts_from_state_dict(state_dict)
-    print("Experts loaded")
+    moe_model.load_experts_from_state_dict(state_dict)
     
-    
-    model.switch_to_expert(2) # Welcher expert classifiziert die beste classe?
-
-
+    moe_model.switch_to_expert(2) # Welcher expert classifiziert die beste classe?
+    device = args.device
 
     # nodel vr is changed
-    model = model.backbone.to(args.device)
-    model.device = args.device
+    moe_model = moe_model.backbone.to(args.device)
+    moe_model.device = args.device
 
-    '''
-    print("EXPERT 2:")
-    print("backbone parameter names:")
-    print([i for i, _ in model.state_dict().items()])
 
-    print("shape of vprompt_tokens:")
-    print(model.state_dict()["vpt_prompt_tokens"].shape)
+    # loading any timm model
+    model = timm.create_model('nf_resnet50.ra2_in1k', pretrained=True)
+    model = model.to(device)
+    model.device = device
 
-    print("memory of vprompt_tokens:")
-    print(model.state_dict()["vpt_prompt_tokens"])
-    print("##################")
-    print("\n")
-    '''
 
-    g = nn.Sequential(*(list(model.children())[:-1])) # input to penultimate layer
-    h = nn.Sequential(*(list(model.children())[-1:])) # penultimate layer to logits
-        # Add ReLU activation to ensure non-negative activations
-    g.add_module("relu", nn.ReLU())# 
+
+    model = craft_switch_models(model, moe_model, device)
+    model.to(device)
+
+    g = nn.Sequential(*(list(model.children())[:-1])).to(device) # input to penultimate layer
+    h = nn.Sequential(*(list(model.children())[-1:])).to(device) # penultimate layer to logits
+
+    #g = nn.Sequential(CustomModuleN_to_2048())
+    #h = nn.Sequential(CustomModuleN_to_2048()) # h funktioniert wie es soll
+
+    #g.add_module("onlyPositiveValues", AddMinValue())
+    #h.add_module("onlyPositiveValues", AddMinValue()) # h funktioniert wie es soll
+
+
+
+
+
+
+    print(g)
 
     # Instanciate CRAFT
     craft = Craft(input_to_latent_model = g,
@@ -214,13 +279,11 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
                 batch_size = 32,
                 device = args.device)
     
-
     # Keine Ahnung was das ist
     config = resolve_data_config({}, model=model)
+    config["input_size"] = (3, 224, 224) # passt besser zu meinem ViT ?
     transform = create_transform(**config)
     to_pil = transforms.ToPILImage()
-
-
 
     # Extract images and labels for the first two classes
     first_two_classes = [0, 1]
@@ -249,12 +312,10 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     print(images_preprocessed.shape)
 
     
-    # to do: PEFT parameter scalieren nach anzahl der experten
     '''
     #
     #
     #
-    device = args.device
     rabbit_class = 330 # imagenet class for rabbit
 
     # loading some images of rabbits !
@@ -272,6 +333,8 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     #
     #
     '''
+
+
     crops, crops_u, concept_bank_w = \
     craft.fit(images_preprocessed, class_id=class0_id)
 
