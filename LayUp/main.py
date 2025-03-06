@@ -365,6 +365,8 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
+        #if t == 9 and args.sweep_logging:
+        #    Logger.instance().log({"GPU_memory": check_gpu_memory()})
         if args.log_gpustat:
             log_gpustat()
         
@@ -380,7 +382,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         Logger.instance().log(eval_res)
 
         # Early stopping if accuracy is too low
-        if float(eval_res["task_mean/acc"]) <= 0.50:
+        if float(eval_res["task_mean/acc"]) <= 0.20:
             wandb_finish()
             sys.exit()
 
@@ -537,7 +539,7 @@ if __name__ == "__main__":
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
-    parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) # kommt am ende weg?
+    parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) 
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
     parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)

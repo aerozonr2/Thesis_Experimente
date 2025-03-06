@@ -63,6 +63,9 @@ def check_gpu_memory(i=None, extra_info=False):
         print("-" * 50)
     else:
         print("CUDA is not available. Check your GPU setup.")
+    
+    
+    return float(f"{torch.cuda.memory_allocated(torch.cuda.current_device()) / 1e6:.2f}")
 
 def move_large_tensor_to_gpu():
     # Check if CUDA is available

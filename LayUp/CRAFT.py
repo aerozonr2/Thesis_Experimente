@@ -180,6 +180,7 @@ class AddMinValue(nn.Module):
         return x
 
 def craft_switch_models(model, moe_model, device):
+    return moe_model
     print("\n######## START ##########\n")
     
     print("EXPERT 2:")
@@ -193,12 +194,13 @@ def craft_switch_models(model, moe_model, device):
     
     #begining = nn.Sequential(moe_model.patch_embed, moe_model.pos_drop)
 
-    model.stem = moe_model.patch_embed
+    model.stem = nn.Sequential(moe_model.patch_embed, moe_model.pos_drop, moe_model.patch_drop, moe_model.norm_pre)
     model.stages = moe_model.blocks
     
-    model.head = nn.Linear(2048, 100)
-    model.final_conv = CustomModuleN_to_2048()
-    model.final_act = nn.Identity()
+    #model.head = nn.Linear(2048, 100)
+    model.final_conv = nn.Identity()
+    model.final_act = nn.Sequential(moe_model.norm, moe_model.fc_norm, moe_model.head_drop)
+    model.head = nn.Sequential(moe_model.head, nn.Linear(100, 100))
     
     model.to(device)
 
@@ -206,7 +208,7 @@ def craft_switch_models(model, moe_model, device):
     print([i for i, _ in model.named_children()])
     for name, param in model.named_children():
         if name == "stages":
-            print(f"stages: many")
+            print(f"stages: {param[0]}")
         else:
             print(f"{name}: {param}")
 
@@ -267,10 +269,6 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
 
 
 
-
-
-    print(g)
-
     # Instanciate CRAFT
     craft = Craft(input_to_latent_model = g,
                 latent_to_logit_model = h,
@@ -281,7 +279,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     
     # Keine Ahnung was das ist
     config = resolve_data_config({}, model=model)
-    config["input_size"] = (3, 224, 224) # passt besser zu meinem ViT ?
+    #config["input_size"] = (3, 224, 224) # passt besser zu meinem ViT ?
     transform = create_transform(**config)
     to_pil = transforms.ToPILImage()
 
