@@ -381,11 +381,12 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         # log results
         Logger.instance().log(eval_res)
 
+        """
         # Early stopping if accuracy is too low
         if float(eval_res["task_mean/acc"]) <= 0.20:
             wandb_finish()
             sys.exit()
-
+        """
 
 
     # Save experts
@@ -534,7 +535,7 @@ if __name__ == "__main__":
 
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
-    parser.add_argument("--moe_max_experts", type=int, default=3)
+    parser.add_argument("--moe_max_experts", type=int, default=5)
     parser.add_argument("--reduce_dataset", default=0.15, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
