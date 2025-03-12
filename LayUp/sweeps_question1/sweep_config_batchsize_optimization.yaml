@@ -1,0 +1,30 @@
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.002]
+  dataset:
+    values: ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
+  finetune_method:
+    values: ["vpt"] # ssf fehlt noch und funktioniert auch noch nicht
+  finetune_epochs:
+    values: [1]
+  moe_max_experts:
+    values: [5]
+  reduce_dataset:
+    values: [1]
+  T:
+    values: [10]
+  classification:
+    values: ['average']
+  backbone:
+    values: ["vit_base_patch16_224"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  selection_method:
+    values: ["random"]

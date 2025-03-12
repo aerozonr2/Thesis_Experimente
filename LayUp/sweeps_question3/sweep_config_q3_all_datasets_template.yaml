@@ -1,0 +1,33 @@
+# num_experts in relation to T. Scaling not linearly
+# One united sweep config for all datasets with average parameters
+# (lr, finetune_method, finetune_epochs, classification, backbone, kd, selection_method)
+program: main.py
+method: random
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: ["average_for_all_dataset"]
+  dataset:
+    values: ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
+  finetune_method:
+    values: ["average_for_all_dataset"]
+  finetune_epochs:
+    values: ["average_for_all_dataset"]
+  moe_max_experts:
+    values: [5]
+  reduce_dataset:
+    values: [1]
+  T:
+    values: [10]
+  classification:
+    values: ["average_for_all_dataset"]
+  backbone:
+    values: ["average_for_all_dataset"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: ["average_for_all_dataset"]
+  selection_method:
+    values: ["random", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"]

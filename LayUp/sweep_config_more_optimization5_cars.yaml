@@ -1,0 +1,34 @@
+program: main.py
+method: random
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    distribution: uniform
+    min: 0.001
+    max: 0.01
+  dataset:
+    values: ["cars"]
+  finetune_method:
+    values: ["adapter", "vpt"]
+  finetune_epochs:
+    distribution: int_uniform
+    min: 1
+    max: 15
+  moe_max_experts:
+    values: [1, 2, 3, 4, 5]
+  reduce_dataset:
+    values: [1]
+  T:
+    values: [10]
+  classification:
+    values: ['bayesian', "average"]
+  backbone:
+    values: ["vit_base_patch16_224"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  selection_method:
+    values: ["kl_div"]

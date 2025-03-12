@@ -354,11 +354,12 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     for param_name, _ in model.backbone.named_parameters():
         if param_name not in model.backbone_param_names:
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
-    
+    check_gpu_memory()
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
         if args.log_gpustat:
             log_gpustat()
+        check_gpu_memory()
         train_dataset.transform = train_transform
         print(f"# Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
@@ -369,6 +370,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         #    Logger.instance().log({"GPU_memory": check_gpu_memory()})
         if args.log_gpustat:
             log_gpustat()
+        check_gpu_memory()
         
 
         # eval on all tasks up to t
@@ -381,12 +383,19 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         # log results
         Logger.instance().log(eval_res)
 
-        """
+        '''
         # Early stopping if accuracy is too low
         if float(eval_res["task_mean/acc"]) <= 0.20:
             wandb_finish()
             sys.exit()
-        """
+        '''
+        check_gpu_memory()
+        
+        if args.exit_after_T != 0:
+            if t == args.exit_after_T:
+                wandb_finish()
+                sys.exit()
+    check_gpu_memory()
 
 
     # Save experts
@@ -544,6 +553,7 @@ if __name__ == "__main__":
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
     parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)
+    parser.add_argument('--exit_after_T', help='finish run after T=?', default=0, type=int)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -595,6 +605,7 @@ if __name__ == "__main__":
     #print("#################")
     #display_profile('cProfile/profile_output3.prof')
     main(args)
+    check_gpu_memory()
     try:
         wandb_finish()
         print("WandB finished")

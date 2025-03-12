@@ -1,0 +1,40 @@
+# Vorgehen:
+# 1. "unwichtige" Parameter herausfinden durch Experimente mit num_exp=1 und reduce_dataset=0.25
+#     Parameter: Backbone
+# 2. Wie 1. aber mut num_exp=5 und reduce_dataset=1 
+#     kd, classification, selection_method
+
+program: main.py
+method: random
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    distribution: uniform
+    min: 0.001
+    max: 0.01
+  dataset:
+    values: ["dataset"]
+  finetune_method:
+    values: ["adapter", "vpt", "ssf"] # SSF braucht andere Python/Modul-Versionen
+  finetune_epochs:
+    distribution: int_uniform
+    min: 1
+    max: 15
+  moe_max_experts:
+    values: [5]
+  reduce_dataset:
+    values: [1]
+  T:
+    values: [10]
+  classification:
+    values: ['bayesian', "average"]
+  backbone:
+    values: ["vit_base_patch16_224", "vit_base_patch16_224_in21k"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [True, False]
+  selection_method:
+    values: ["eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"]
