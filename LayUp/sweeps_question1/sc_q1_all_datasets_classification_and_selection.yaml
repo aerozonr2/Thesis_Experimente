@@ -5,7 +5,7 @@ metric:
   goal: maximize
 parameters:
   lr:
-    values: [0.01]
+    values: [0.001]
   dataset:
     values: ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
   finetune_epochs:
@@ -13,7 +13,7 @@ parameters:
   moe_max_experts:
     values: [3]
   reduce_dataset:
-    values: [0.2]
+    values: [1.1]
   T:
     values: [10]
   classification:

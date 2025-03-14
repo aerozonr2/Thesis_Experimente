@@ -34,11 +34,56 @@ def display_profile(file_path="cProfile/profile_output.prof", sort_by="cumulativ
     except Exception as e:
         print(f"An error occurred: {e}")
 
-def shrink_dataset(dataset, fraction=0.25):
+
+def optimize_batch_size(args):
+    # For 12 GB GPU
+    batch_size = args.batch_size
+    if args.T == 10 and args.moe_max_experts <= 5:
+        datasets = ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
+
+        optimized_batch_sizes = {
+            "cifar100": 40,
+            "imagenetr": 32,
+            "cub": 48,
+            "dil_imagenetr": 32,
+            "imageneta": 48,
+            "vtab": 40,
+            "cars": 48,
+            "omnibenchmark": 32,
+            "limited_domainnet": 24,
+            "cddb": 32 # not checked yet
+        }
+        return optimized_batch_sizes[args.dataset]
+    else:
+        print("Batch size can't be optimized for the current configuration.")
+        return batch_size
+
+
+def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):
     """
     Shrinks the dataset to a fraction of its original size.
     
     """
+    if fraction == 1.0:
+        print("Dataset size is unchanged.")
+        return dataset
+    
+    if fraction > 1.0:
+        class_counts = {cls: 0 for cls in classes}
+        filtered_dataset = []
+        print("+++++++")
+        for image, label in dataset:
+            if label in classes and class_counts[label] < num_images_per_class:
+                filtered_dataset.append((image, label))
+                class_counts[label] += 1
+
+            # Stop if we have enough images for all classes
+            if all(count >= num_images_per_class for count in class_counts.values()):
+                break
+        print("-------")
+        return filtered_dataset
+    
+
     # Calculate the number of samples to keep
     num_samples = int(len(dataset) * fraction)
     

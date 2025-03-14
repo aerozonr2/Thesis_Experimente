@@ -40,7 +40,7 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
-from src.support_functions import check_gpu_memory, shrink_dataset, display_profile, log_gpustat
+from src.support_functions import check_gpu_memory, shrink_dataset, display_profile, log_gpustat, optimize_batch_size
 
 
 def set_seed(seed):
@@ -393,6 +393,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         
         if args.exit_after_T != 0:
             if t == args.exit_after_T:
+                print(f"Finished after T={args.exit_after_T}")
                 wandb_finish()
                 sys.exit()
     check_gpu_memory()
@@ -452,9 +453,10 @@ def main(args):
     update_transforms(test_base_dataset, transform=test_transform)
 
     # for faster testing reduce dataset
+    num_images_per_class = 50
     fraction = float(args.reduce_dataset)
-    train_base_dataset = shrink_dataset(train_base_dataset, fraction)
-    test_base_dataset = shrink_dataset(test_base_dataset, fraction)
+    train_base_dataset = shrink_dataset(train_base_dataset, fraction, num_images_per_class=num_images_per_class)
+    test_base_dataset = shrink_dataset(test_base_dataset, fraction, num_images_per_class=num_images_per_class / 2)
     print(f"Reduced dataset size. Fraction {fraction}")
 
 
@@ -545,7 +547,7 @@ if __name__ == "__main__":
     # Approach
     parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
     parser.add_argument("--moe_max_experts", type=int, default=5)
-    parser.add_argument("--reduce_dataset", default=0.15, help="Reduce dataset size for faster testing", type=float)
+    parser.add_argument("--reduce_dataset", default=1.0, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
@@ -573,6 +575,10 @@ if __name__ == "__main__":
     args = update_args(args)
     set_seed(args.seed)
 
+    # For faster computation
+    args.batch_size = optimize_batch_size(args)
+    print(f"Optimized batch size: {args.batch_size}")
+    
     setup_logger(args)
     
     if args.sweep_logging:
