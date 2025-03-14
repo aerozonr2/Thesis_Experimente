@@ -1,5 +1,6 @@
 *.pth
 *.log
+*.png
 **/local_data
 **/local_experts
 **/local_logs
