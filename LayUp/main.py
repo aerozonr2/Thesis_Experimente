@@ -40,7 +40,7 @@ from src.data import (
 from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
-from src.support_functions import check_gpu_memory, shrink_dataset, display_profile, log_gpustat, optimize_batch_size
+from src.support_functions import check_gpu_memory, shrink_dataset, display_profile, log_gpustat, optimize_args
 
 
 def set_seed(seed):
@@ -553,6 +553,7 @@ if __name__ == "__main__":
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
     parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) 
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
+    parser.add_argument('--kd_alpha', help='Alpha for knowledge distillation', default=0.99, type=float)
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
     parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)
     parser.add_argument('--exit_after_T', help='finish run after T=?', default=0, type=int)
@@ -576,8 +577,8 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     # For faster computation
-    args.batch_size = optimize_batch_size(args)
-    print(f"Optimized batch size: {args.batch_size}")
+    args = optimize_args(args)
+    print(f"Args optimized: {args}")
     
     setup_logger(args)
     

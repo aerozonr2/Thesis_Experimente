@@ -35,9 +35,8 @@ def display_profile(file_path="cProfile/profile_output.prof", sort_by="cumulativ
         print(f"An error occurred: {e}")
 
 
-def optimize_batch_size(args):
-    # For 12 GB GPU
-    batch_size = args.batch_size
+def optimize_args(args):
+    # Batchsize for 12 GB GPU
     if args.T == 10 and args.moe_max_experts <= 5:
         datasets = ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
 
@@ -53,10 +52,27 @@ def optimize_batch_size(args):
             "limited_domainnet": 24,
             "cddb": 32 # not checked yet
         }
-        return optimized_batch_sizes[args.dataset]
+        args.batch_size = optimized_batch_sizes[args.dataset]
     else:
         print("Batch size can't be optimized for the current configuration.")
-        return batch_size
+
+    # Backbones
+    opm_backbone = {
+        "cifar100": "vit_base_patch16_224",
+        "imagenetr": "vit_base_patch16_224_in21k",
+        "cub": "vit_base_patch16_224_in21k",
+        "dil_imagenetr": "vit_base_patch16_224_in21k",
+        "imageneta": "vit_base_patch16_224_in21k",
+        "vtab": "vit_base_patch16_224",
+        "cars": "vit_base_patch16_224",
+        "omnibenchmark": "vit_base_patch16_224",
+        "limited_domainnet": "vit_base_patch16_224",
+        "cddb": "vit_base_patch16_224" # not checked yet
+    }
+    args.backbone = opm_backbone[args.dataset]
+
+    
+    return args
 
 
 def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):

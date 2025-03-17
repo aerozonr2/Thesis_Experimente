@@ -49,7 +49,7 @@ class MoE_SEED(nn.Module):
         self.args = args
         self.backbone_param_names = []
         self.num_classes = None
-        self.alpha = 0.99 # Knowledge distillation parameter for the loss function. 1.0 means no knowledge distillation. 0.99 is from SEED.
+        self.alpha = args.kd_alpha # Knowledge distillation parameter for the loss function. 1.0 means no knowledge distillation. 0.99 is from SEED.
         self.gmms = args.gmms
         self.use_multivariate = args.use_multivariate
         self.selection_method = args.selection_method

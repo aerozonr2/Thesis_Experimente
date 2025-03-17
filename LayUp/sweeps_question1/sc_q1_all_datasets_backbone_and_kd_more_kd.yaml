@@ -19,7 +19,7 @@ parameters:
   classification:
     values: ["average"]
   backbone:
-    values: ["vit_base_patch16_224", "vit_base_patch16_224_in21k"]
+    values: ["vit_base_patch16_224"]
   sweep_logging:
     values: [True]
   kd:
@@ -28,3 +28,5 @@ parameters:
     values: ["random"]
   exit_after_T:
     values: [4]
+  kd_alpha:
+    values: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
