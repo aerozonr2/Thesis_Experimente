@@ -38,8 +38,6 @@ def display_profile(file_path="cProfile/profile_output.prof", sort_by="cumulativ
 def optimize_args(args):
     # Batchsize for 12 GB GPU
     if args.T == 10 and args.moe_max_experts <= 5:
-        datasets = ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
-
         optimized_batch_sizes = {
             "cifar100": 40,
             "imagenetr": 32,
@@ -80,7 +78,7 @@ def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 
     Shrinks the dataset to a fraction of its original size.
     
     """
-    if fraction == 1.0:
+    if float(fraction) == 1.0:
         print("Dataset size is unchanged.")
         return dataset
     
