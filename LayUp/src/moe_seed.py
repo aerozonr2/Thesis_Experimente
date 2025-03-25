@@ -292,6 +292,13 @@ class MoE_SEED(nn.Module):
 
                     #
                     '''
+                    print(++++++++++++++++++++++++++++)
+                    print(new_gmm.var.data[0][0].shape)
+                    print(new_gmm.var.data[0][0])
+                    print(new_gmm.mu.data[0][0].shape)
+                    print(new_gmm.mu.data[0][0])
+                    print(++++++++++++++++++++++++++++)
+
                     new_gmm = torch.full((1, 1, 10), 10.)
                     new_cov = torch.eye(10) * 0.1
                     new_gauss = MultivariateNormal(new_gmm[0][0], covariance_matrix=new_cov)
@@ -336,7 +343,7 @@ class MoE_SEED(nn.Module):
                     print(f"KL Divergence 4: {kl_div8}")
 
 
-                    assert False
+                    exit(0)
                     '''
                     #
 
@@ -519,8 +526,8 @@ class MoE_SEED(nn.Module):
     def predict_class_bayes(self, features):
         fill_value = -1e8
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
-        # shape: (batch_size, num_experts, num_classes/num_distr. learned by expert one) 
-        mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
+        # shape: (batch_size, num_experts, num_classes/num_distr.) 
+        #mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
         for expert_index in range(len(self.experts_distributions)):
             for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
 
@@ -528,7 +535,7 @@ class MoE_SEED(nn.Module):
                     continue
                 else:
                     log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
-                    mask[:, expert_index, c] = True # This class was learned by this expert
+                    #mask[:, expert_index, c] = True # This class was learned by this expert
         
         #print("########## Bayes: ##########")
         flattened = log_probs.reshape(log_probs.shape[0], -1)

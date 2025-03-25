@@ -354,12 +354,10 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     for param_name, _ in model.backbone.named_parameters():
         if param_name not in model.backbone_param_names:
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
-    check_gpu_memory()
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
         if args.log_gpustat:
             log_gpustat()
-        check_gpu_memory()
         train_dataset.transform = train_transform
         print(f"# Task {t}")
         print(f"Train dataset: {len(train_dataset)}")
@@ -370,7 +368,6 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         #    Logger.instance().log({"GPU_memory": check_gpu_memory()})
         if args.log_gpustat:
             log_gpustat()
-        check_gpu_memory()
         
 
         # eval on all tasks up to t
@@ -389,14 +386,12 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
             wandb_finish()
             sys.exit()
         '''
-        check_gpu_memory()
         
         if args.exit_after_T != 0:
             if t == args.exit_after_T:
                 print(f"Finished after T={args.exit_after_T}")
                 wandb_finish()
                 sys.exit()
-    check_gpu_memory()
 
 
     # Save experts
@@ -612,7 +607,6 @@ if __name__ == "__main__":
     #print("#################")
     #display_profile('cProfile/profile_output3.prof')
     main(args)
-    check_gpu_memory()
     try:
         wandb_finish()
         print("WandB finished")
