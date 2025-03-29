@@ -172,7 +172,6 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
     num_samples = {}
     results = {}
     for i, test_dataset in enumerate(data_manager.test_iter(up_to_task)):
-        #print(f"########## {i} ##########")
         task_res = eval_dataset(model, test_dataset, args)
         results[i] = task_res
         num_samples[i] = len(test_dataset)
@@ -188,6 +187,9 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
     # add mean
     keys_to_mean = results[0].keys()
     for key in keys_to_mean:
+        if key == "expert_percentages":
+            continue
+        # mean over all tasks
         final_results[f"task_mean/{key}"] = np.mean(
             [v[key] for v in results.values()]
         ).item()
@@ -229,12 +231,27 @@ def eval_dataset(model, dataset, args):
     #print("########## Labels: ##########")
     #print(labels)
     #print(f"len: {[len(i) for i in labels]}")
+    
+    #print("All Labels")
     labels = np.concatenate(labels, axis=0)
     #print(labels)
+    #print("Pedictions:")
+    #print(predictions)
     #print("########## END ##########")
     acc = (predictions.argmax(1) == labels).mean().item()
-    return {"acc": acc}
 
+    winning_experts = torch.cat(model.task_winning_expert, dim=0)
+    # Count occurrences of each expert being the highest
+    expert_counts = torch.bincount(winning_experts)
+    # Convert to percentages
+    expert_percentages = expert_counts.float() / winning_experts.shape[0] * 100
+    # Format as a list of rounded percentages
+    formatted_percentages = [f"{p:.1f}%" for p in expert_percentages.tolist()]
+    print("Expert Contribution Percentages for past task:", formatted_percentages)
+    model.task_winning_expert = []
+    
+    #return {"acc": acc, "expert_percentages": formatted_percentages}    
+    return {"acc": acc}
 
 def use_layup(data_manager, train_transform, test_transform, args):
     backbone = get_backbone(args.backbone, finetune_method=args.finetune_method)
@@ -374,12 +391,14 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         model.eval()
         model.freeze(fully=True)
         eval_res = eval_datamanager(model, data_manager, t, args)
-        print(eval_res)
+        sorted_by_keys = dict(sorted(eval_res.items()))
+
+        print("Sorted by keys:", sorted_by_keys)
+
         if args.log_gpustat:
             log_gpustat()
         # log results
         Logger.instance().log(eval_res)
-
         '''
         # Early stopping if accuracy is too low
         if float(eval_res["task_mean/acc"]) <= 0.20:
@@ -552,6 +571,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
     parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)
     parser.add_argument('--exit_after_T', help='finish run after T=?', default=0, type=int)
+    parser.add_argument('--kl_div_test', help='test', default=0, type=int, choices=[0, 1, 2])
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -603,9 +623,11 @@ if __name__ == "__main__":
 
     #display_profile('cProfile/profile_output3.prof')
     #assert False
-    #cProfile.run('main(args)', 'cProfile/profile_output3.prof')
+    #cProfile.run('main(args)', 'cProfile/runtime_optim.prof')
     #print("#################")
-    #display_profile('cProfile/profile_output3.prof')
+    #display_profile('cProfile/runtime.prof')
+    #display_profile('cProfile/runtime_optim.prof')
+
     main(args)
     try:
         wandb_finish()

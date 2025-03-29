@@ -17,6 +17,7 @@ import copy
 import random
 import torch
 from tqdm import tqdm
+import time
 
 import numpy as np
 
@@ -58,6 +59,8 @@ class MoE_SEED(nn.Module):
         self.classification = args.classification # average/bayes # Trash
         self.kd = args.kd # muss am ende Weg?
         self.logger = None
+        self.kl_div_test = args.kl_div_test
+        self.task_winning_expert = []
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -148,17 +151,18 @@ class MoE_SEED(nn.Module):
         model.train()
 
         # GPU/CPU
-        model.to(self.device)
+        model.to(self.device, non_blocking=True)
         # Train model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
 
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
+            print(f"Training epoch {epoch}")
             running_loss = 0.0
-            num_train_loader = len(train_loader)
-            pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
-            for _, (inputs, labels) in pbar:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+            #num_train_loader = len(train_loader)
+            #pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
+            for inputs, labels in train_loader:
+                inputs, labels = inputs.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
                 optimizer.zero_grad()
                 outputs = model(inputs)
                 loss = self.criterion(outputs, labels)
@@ -186,7 +190,7 @@ class MoE_SEED(nn.Module):
         if isinstance(self.backbone.head, nn.Identity):
             self.backbone.head = nn.Linear(self.backbone.num_features, self.num_classes)
         self.backbone.head.load_state_dict(self.expert_heads[expert_index])
-        self.backbone.head.to(self.device)
+        self.backbone.head.to(self.device, non_blocking=True)
 
     @torch.no_grad()
     def forward(self, x):
@@ -220,10 +224,12 @@ class MoE_SEED(nn.Module):
         for expert_index in range(len(self.experts)):
             self.switch_to_expert(expert_index)
             self.backbone.head = nn.Identity()
-            self.backbone.to(self.device)            
+            self.backbone.to(self.device, non_blocking=True)            
             out = self.backbone(x)
             features.append(out)
-        synthetic_softmaxed_logits = self.predict_class_bayes(features=torch.stack(features, dim=1))
+
+        stacked_features = torch.stack(features, dim=1)
+        synthetic_softmaxed_logits = self.predict_class_bayes(features=stacked_features)
         return synthetic_softmaxed_logits
 
     def choose_expert_to_finetune(self, train_dataset):
@@ -234,9 +240,9 @@ class MoE_SEED(nn.Module):
         elif self.selection_method == 'inv_eucld_dist':
             return self.selection_euclidean_distance(train_dataset, inverted=True)
         elif self.selection_method == 'kl_div':
-            return self.selection_kl_divergence(train_dataset)
+            return self.selection_kl_divergence(train_dataset, test=self.kl_div_test)
         elif self.selection_method == 'inv_kl_div':
-            return self.selection_kl_divergence(train_dataset, inverted=True)
+            return self.selection_kl_divergence(train_dataset, inverted=True, test=self.kl_div_test)
         elif self.selection_method == 'ws_div':
             return self.selection_ws_divergence(train_dataset)
         elif self.selection_method == 'inv_ws_div':
@@ -275,8 +281,10 @@ class MoE_SEED(nn.Module):
             exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
         return exp_to_finetune
 
-    def selection_kl_divergence(self, train_dataset, inverted=False):
+    def selection_kl_divergence(self, train_dataset, inverted=False, test=0):
         # KL divergence between the current task distribution and the distributions of the experts
+        print("########### Kl_div ########")
+
         experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
 
         for expert_index in range(self.max_experts):
@@ -289,7 +297,7 @@ class MoE_SEED(nn.Module):
                 new_gauss = MultivariateNormal(new_gmm.mu.data[0][0], covariance_matrix=new_gmm.var.data[0][0])
                 for o, old_gmm in enumerate(learned_distributions):
                     old_gauss = MultivariateNormal(old_gmm.mu.data[0][0], covariance_matrix=old_gmm.var.data[0][0])
-
+                    
                     #
                     '''
                     print(++++++++++++++++++++++++++++)
@@ -349,8 +357,31 @@ class MoE_SEED(nn.Module):
 
                     kl_div = torch.distributions.kl_divergence(new_gauss, old_gauss) # KL divergence between the current task distribution and the distributions of the experts (of each class)
                     kl_matrix[n, o] = kl_div
+                    
+            if test == 0: # normal
+                experts_mean_kl_div[expert_index] = torch.mean(kl_matrix)
+                print("Normal kl_div")
+            elif test == 1: # test 1
+                experts_mean_kl_div[expert_index] = torch.min(kl_matrix)
+                print("Min kl_div")
+            elif test == 2: # test 2
+                experts_mean_kl_div[expert_index] = torch.max(kl_matrix)
+                print("Max kl_div")
+            else:
+                pass
+            
+            print(f"Expert: {expert_index}")
+            #print("Rounded Kl Matrix:")
+            #print(kl_matrix.to(torch.int))
+            print(f"Mean Kl_div: {torch.mean(kl_matrix)}")
+            print(f"Min Kl_div: {torch.min(kl_matrix)}")
+            print(f"Max Kl_div: {torch.max(kl_matrix)}")
 
-            experts_mean_kl_div[expert_index] = torch.mean(kl_matrix)
+            print("---")
+        print("+++++++++++")
+        print(f"All Experts Kl_div: {experts_mean_kl_div}")
+        print("########################")
+        
         if inverted:
             exp_to_finetune = torch.argmin(experts_mean_kl_div)
         else:
@@ -394,23 +425,24 @@ class MoE_SEED(nn.Module):
         model.head = nn.Linear(num_features, num_classes)
         
         self.freeze_ViT_unfreeze_PEFT()
-        model.to(self.device)
+        model.to(self.device, non_blocking=True)
 
         # Finetune model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
+            print(f"Finetune epoch {epoch}")
             model.train()
             for m in model.modules():
                 if isinstance(m, nn.BatchNorm2d):
                     m.eval()
             
             running_loss = 0.0
-            num_train_loader = len(train_loader)
-            pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
+            #num_train_loader = len(train_loader)
+            #pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
             # Logger.instance().add_backend(TQDMLogger(pbar)) # Ist is LayUp, weiß nicht ob notwendig
-            for _, (inputs, labels) in pbar:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+            for inputs, labels in train_loader:
+                inputs, labels = inputs.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
                 optimizer.zero_grad()
                 with torch.no_grad():
                         old_features = old_model.forward_features(inputs)
@@ -461,15 +493,15 @@ class MoE_SEED(nn.Module):
         model = self.backbone
         model.head = nn.Identity()
         model.eval()
-        model.to(self.device)
+        model.to(self.device, non_blocking=True)
 
         gmms = []
 
         # Iterate over each class
         unique_labels = all_labels.unique()
 
-        pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
-        for _, class_label in pbar:
+        #pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
+        for class_label in unique_labels:
             # Get all images of the class
             class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
             class_images = all_images[class_indices]
@@ -487,7 +519,7 @@ class MoE_SEED(nn.Module):
             # Process each image in the class and its flipped version
             for images in class_loader:
                 bsz = images.shape[0]
-                images = images.to(self.device)
+                images = images.to(self.device, non_blocking=True)
                 features = model(images)
                 class_features[from_: from_+bsz, :] = features
                 features = model(torch.flip(images, dims=(3,)))
@@ -499,7 +531,7 @@ class MoE_SEED(nn.Module):
             eps = 1e-8
             while not is_ok:
                 try:
-                    gmm = GaussianMixture(self.gmms, class_features.shape[1], covariance_type=cov_type, eps=eps).to(self.device)
+                    gmm = GaussianMixture(self.gmms, class_features.shape[1], covariance_type=cov_type, eps=eps).to(self.device, non_blocking=True)
                     gmm.fit(class_features, delta=1e-3, n_iter=100)
                 except RuntimeError:
                     eps = 10 * eps
@@ -523,30 +555,113 @@ class MoE_SEED(nn.Module):
     def eval(self):
         self.backbone.eval()
 
+    def predict_class_bayes_new(self, features):
+        all_distr = list()
+        #
+        """
+        # test
+        self.experts_distributions[0] = [1, [], 3, []]
+        self.experts_distributions.append([[], 2, [], []])
+        self.experts_distributions.append([[], [], [], 4])
+        
+        #
+        for _class in range(len(self.experts_distributions[0])):
+            for expert_distr in self.experts_distributions:
+                distr = expert_distr[_class]
+                if distr == list():
+                    pass
+                else:
+                    all_distr.append(distr)
+    
+        print(self.experts_distributions)
+        print(all_distr)
+        """
+        # classification: gleiches mit den echten distrs m,achen und dann einfach ne matrix mit den samples und den klassen distrs (gmms). es muss ja ansich nicht nach experte aufgeteilt werden.
+        # selection: runn (https://wandb.ai/belaschindler-university-hamburg/Test%20project/runs/u89ipbvk/overview) angucken und dann sehen wo es mit der kl_div schief ging
+        all_class_distr = list()
+        for _class in range(len(self.experts_distributions[0])):
+            for expert_distr in self.experts_distributions:
+                distr = expert_distr[_class]
+                if distr == list():
+                    pass
+                else:
+                    all_class_distr.append(distr)
+                  
+        fill_value = -1e8
+        log_probs = torch.full((features.shape[0], len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
+        # shape: (batch_size, num_classes/num_distr.) 
+        
+        for c, class_gmm in enumerate(all_class_distr):
+            probs = class_gmm.score_samples(features)
+            print(f"Class {c}:")
+            print(probs.shape)
+            print(probs)
+            log_probs[:, c] = probs
+        time.sleep(3)    
+        log_probs_softmaxed = torch.softmax(log_probs/self.tau, dim=1) # tau? x= filtered/self.tau
+
+        padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
+        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0)
+        #print(log_probs.shape)
+        #print(log_probs) #### !!!!!!!!!!!!!!!!! wieso hat jedes bild die gleiche wahrscheinlichkeit?  featueshape ist [batchsize, experts, features], wird das beachtet(es wird momentan immer nur der erste experte gefrag. der weiß ja aber ncihts vom zweiten task)?? muss doch 3d gemach werden, oder lieber das kriterium berechnen und das dann speichern(wenn das geht)? wie entscheide ich mich für einen experten oder nehme ich den durchschnitt? Wie macht das SEED?
+        #print("---")
+        #print(log_probs_softmaxed)
+        #print("---")
+        #print(padding)
+        #print("---")
+        #print(synthetic_softmaxed_logits)
+        #print(synthetic_softmaxed_logits.shape)
+        #print(str(synthetic_softmaxed_logits[0]))
+        #print("---")
+        return synthetic_softmaxed_logits
+    
     def predict_class_bayes(self, features):
+        #print("##### Classification (predict_class_bayes) ######")
         fill_value = -1e8
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
         # shape: (batch_size, num_experts, num_classes/num_distr.) 
-        #mask = torch.full_like(log_probs, fill_value=False, dtype=torch.bool)
         for expert_index in range(len(self.experts_distributions)):
             for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
 
                 if class_gmm == []: # Class not learned by this expert
                     continue
                 else:
-                    log_probs[:, expert_index, c] = class_gmm.score_samples(features[:, expert_index])
-                    #mask[:, expert_index, c] = True # This class was learned by this expert
-        
-        #print("########## Bayes: ##########")
+                    #print(f"Shape of one experts Features of Class: {features[:, expert_index].shape}")
+                    probs = class_gmm.score_samples(features[:, expert_index])
+                    #print(f"Probs Shape: {probs.shape}")
+                    log_probs[:, expert_index, c] = probs
+        #print("### Bayes ###")
         flattened = log_probs.reshape(log_probs.shape[0], -1)
         filtered = flattened[flattened != fill_value].reshape(log_probs.shape[0], -1)
         log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1) # tau? x= filtered/self.tau
         padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
         synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0)
+        #print(log_probs[0])
+        #print(log_probs.shape)
+        
+        #print(flattened[0])
+        #print(flattened.shape)
+        
+        #print(filtered[0])
+        #print(filtered.shape)
+        
+        #print(log_probs_softmaxed[0])
+        #print(log_probs_softmaxed.shape)
+        
+        #print(synthetic_softmaxed_logits[0])
+        #print(synthetic_softmaxed_logits.shape)
 
-        scores = filtered - filtered.max(dim=1, keepdim=True).values
+        # which expert classifies:
+        # Find the highest probability per expert for each sample
+        max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]
+        # Find which expert had the highest probability
+        winning_expert = max_probs_per_expert.argmax(dim=1)  # Shape: [batchsize]
+        # Ensure integer type
+        winning_expert = winning_expert.to(torch.int64)
+        self.task_winning_expert.append(winning_expert)
+
+        #scores = filtered - filtered.max(dim=1, keepdim=True).values
         #print(scores)
-        #print("########## END ##########")
         return synthetic_softmaxed_logits
 
     def criterion(self, outputs, targets, features=None, old_features=None):
@@ -618,7 +733,7 @@ class MoE_SEED(nn.Module):
     def to(self, device=None):
         if device is None:
             device = self.device
-        self.backbone.to(device)
+        self.backbone.to(device, non_blocking=True)
         return self
     
     def children(self):

@@ -37,7 +37,7 @@ def display_profile(file_path="cProfile/profile_output.prof", sort_by="cumulativ
 
 def optimize_args(args):
     # Batchsize for 12 GB GPU
-    if args.T == 10 and args.moe_max_experts <= 5:
+    if args.T == 10 and args.moe_max_experts <= 5 and args.batch_size == 32:
         optimized_batch_sizes = {
             "cifar100": 40,
             "imagenetr": 32,
@@ -87,6 +87,7 @@ def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 
         filtered_dataset = []
         print("+++++++")
         for image, label in dataset:
+            # images per class per task
             if label in classes and class_counts[label] < num_images_per_class:
                 filtered_dataset.append((image, label))
                 class_counts[label] += 1
@@ -134,7 +135,7 @@ def move_large_tensor_to_gpu():
     tensor = torch.randn(1000, 1000)  # Example tensor of shape (1000, 1000)
     
     # Move the tensor to the GPU (or keep it on CPU if CUDA is unavailable)
-    tensor = tensor.to(device)
+    tensor = tensor.to(device, non_blocking=True)
     check_gpu_memory()
 
     
