@@ -44,7 +44,7 @@ def optimize_args(args):
             "cub": 48,
             "dil_imagenetr": 32,
             "imageneta": 48,
-            "vtab": 40,
+            "vtab": 32, # Sometimes 40
             "cars": 48,
             "omnibenchmark": 32,
             "limited_domainnet": 24,

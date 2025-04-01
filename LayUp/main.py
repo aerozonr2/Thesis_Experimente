@@ -172,6 +172,7 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
     num_samples = {}
     results = {}
     for i, test_dataset in enumerate(data_manager.test_iter(up_to_task)):
+        print(f"######## Evaluating task {i} ########")
         task_res = eval_dataset(model, test_dataset, args)
         results[i] = task_res
         num_samples[i] = len(test_dataset)
@@ -217,7 +218,7 @@ def eval_dataset(model, dataset, args):
     predictions = []
     labels = []
 
-    for x, y in tqdm(dataloader, desc="Evaluating"):
+    for x, y in dataloader:
         x = x.to(args.device)
         y = y.to(args.device)
         y_hat = model(x)
@@ -240,6 +241,7 @@ def eval_dataset(model, dataset, args):
     #print("########## END ##########")
     acc = (predictions.argmax(1) == labels).mean().item()
 
+    #print(f"model.task_winning_expert: {model.task_winning_expert}")
     winning_experts = torch.cat(model.task_winning_expert, dim=0)
     # Count occurrences of each expert being the highest
     expert_counts = torch.bincount(winning_experts)
@@ -247,7 +249,7 @@ def eval_dataset(model, dataset, args):
     expert_percentages = expert_counts.float() / winning_experts.shape[0] * 100
     # Format as a list of rounded percentages
     formatted_percentages = [f"{p:.1f}%" for p in expert_percentages.tolist()]
-    print("Expert Contribution Percentages for past task:", formatted_percentages)
+    print("Expert Contribution Percentages for task:", formatted_percentages)
     model.task_winning_expert = []
     
     #return {"acc": acc, "expert_percentages": formatted_percentages}    
@@ -564,7 +566,7 @@ if __name__ == "__main__":
     parser.add_argument("--reduce_dataset", default=1.0, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
-    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
+    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
     parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) 
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
     parser.add_argument('--kd_alpha', help='Alpha for knowledge distillation', default=0.99, type=float)

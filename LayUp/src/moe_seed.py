@@ -92,7 +92,11 @@ class MoE_SEED(nn.Module):
 
             self.train_expert(train_dataset)
         else:
-            expert_index = self.choose_expert_to_finetune(train_dataset)
+            expert_index = self.choose_expert_to_finetune(train_dataset, t)
+            #expert_index = 1 # Test
+            #print("Experte index: expert_index = t mod self.max_experts")
+            #expert_index = t % self.max_experts
+            #print(f"Finetune Index is set to {expert_index}")
             print(f"Finetuning expert {expert_index} on task {t}:")
             self.finetune_expert(expert_index, train_dataset) 
             choosen_expert_index = expert_index
@@ -232,9 +236,11 @@ class MoE_SEED(nn.Module):
         synthetic_softmaxed_logits = self.predict_class_bayes(features=stacked_features)
         return synthetic_softmaxed_logits
 
-    def choose_expert_to_finetune(self, train_dataset):
+    def choose_expert_to_finetune(self, train_dataset, t):
         if self.selection_method == 'random':
             return self.selection_random()
+        elif self.selection_method == 'around':
+            return t % self.max_experts
         elif self.selection_method == 'eucld_dist':
             return self.selection_euclidean_distance(train_dataset)
         elif self.selection_method == 'inv_eucld_dist':
@@ -633,24 +639,25 @@ class MoE_SEED(nn.Module):
         #print("### Bayes ###")
         flattened = log_probs.reshape(log_probs.shape[0], -1)
         filtered = flattened[flattened != fill_value].reshape(log_probs.shape[0], -1)
-        log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1) # tau? x= filtered/self.tau
+        log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
         padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
-        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0)
-        #print(log_probs[0])
-        #print(log_probs.shape)
+        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
+        print("---------------")
+        print(log_probs[0].tolist())
+        print(log_probs.shape)
         
-        #print(flattened[0])
-        #print(flattened.shape)
+        print(flattened[0].tolist())
+        print(flattened.shape)
         
-        #print(filtered[0])
-        #print(filtered.shape)
+        print(filtered[0].tolist())
+        print(filtered.shape)
         
-        #print(log_probs_softmaxed[0])
-        #print(log_probs_softmaxed.shape)
+        print(log_probs_softmaxed[0].tolist())
+        print(log_probs_softmaxed.shape)
         
-        #print(synthetic_softmaxed_logits[0])
-        #print(synthetic_softmaxed_logits.shape)
-
+        print(synthetic_softmaxed_logits[0].tolist())
+        print(synthetic_softmaxed_logits.shape)
+        print("###############")
         # which expert classifies:
         # Find the highest probability per expert for each sample
         max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]
