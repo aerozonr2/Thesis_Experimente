@@ -222,6 +222,9 @@ def eval_dataset(model, dataset, args):
         x = x.to(args.device)
         y = y.to(args.device)
         y_hat = model(x)
+        print(f"--- Real label: {y.tolist()[0]}")
+        print("###############")
+
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
     

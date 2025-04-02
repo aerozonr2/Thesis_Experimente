@@ -233,6 +233,7 @@ class MoE_SEED(nn.Module):
             features.append(out)
 
         stacked_features = torch.stack(features, dim=1)
+        #print(f"Stacked features shape: {stacked_features.shape}")
         synthetic_softmaxed_logits = self.predict_class_bayes(features=stacked_features)
         return synthetic_softmaxed_logits
 
@@ -521,16 +522,22 @@ class MoE_SEED(nn.Module):
 
             # Get expert features
             from_ = 0
-            class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
-            # Process each image in the class and its flipped version
+
+            # Not flipped anymore
+            #class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
+            class_features = torch.full((len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
+
+            # Process each image in the class (and its flipped version)
             for images in class_loader:
                 bsz = images.shape[0]
                 images = images.to(self.device, non_blocking=True)
                 features = model(images)
-                class_features[from_: from_+bsz, :] = features
-                features = model(torch.flip(images, dims=(3,)))
-                class_features[from_+bsz: from_+2*bsz, :] = features
-                from_ += 2*bsz
+                class_features[from_: from_+bsz, : model.num_features] = features
+                #features = model(torch.flip(images, dims=(3,)))
+                #class_features[from_+bsz: from_+2*bsz, :] = features
+                #from_ += 2*bsz
+                from_ += bsz
+
             # Calculate distributions
             cov_type = "full" if self.use_multivariate else "diag"
             is_ok = False
@@ -555,6 +562,14 @@ class MoE_SEED(nn.Module):
             assert gmm_shape[2] == model.num_features
 
             gmms.append(gmm)
+            #
+            rrr = list()
+            print(f"Shape of class features: {class_features.shape}")
+            for c in class_features:
+                rrr.append(gmm.score_samples(c))
+            print(rrr)
+            exit(0)
+            #
         return gmms
 
     @torch.no_grad()
@@ -592,7 +607,7 @@ class MoE_SEED(nn.Module):
                     pass
                 else:
                     all_class_distr.append(distr)
-                  
+                
         fill_value = -1e8
         log_probs = torch.full((features.shape[0], len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
         # shape: (batch_size, num_classes/num_distr.) 
@@ -632,32 +647,44 @@ class MoE_SEED(nn.Module):
                 if class_gmm == []: # Class not learned by this expert
                     continue
                 else:
-                    #print(f"Shape of one experts Features of Class: {features[:, expert_index].shape}")
-                    probs = class_gmm.score_samples(features[:, expert_index])
+                    experts_class_features = features[:, expert_index]
+                    probs = class_gmm.score_samples(experts_class_features)
                     #print(f"Probs Shape: {probs.shape}")
                     log_probs[:, expert_index, c] = probs
         #print("### Bayes ###")
-        flattened = log_probs.reshape(log_probs.shape[0], -1)
-        filtered = flattened[flattened != fill_value].reshape(log_probs.shape[0], -1)
+        # Initialize the output tensor, which will store the result
+        # The output tensor should have the same number of columns but the number of rows will be reduced.
+        output = []
+
+        # Loop through the first dimension (along the 2D slices)
+        for i in range(log_probs.shape[0]):
+            # For each row in the slice (2D array), remove the fill_value (-1e8)
+            row_result = []
+            for j in range(log_probs.shape[2]):  # Loop through columns (2nd dimension)
+                # Get the column values for the current column across all rows in the slice
+                valid_values = log_probs[i, :, j][log_probs[i, :, j] != fill_value]
+                
+                # If there are valid values, get the first (they should only be one value per column)
+                if len(valid_values) > 0:
+                    row_result.append(valid_values[0])  # Keep only the first valid value for the column
+            
+            output.append(row_result)  # Add the processed row to the output
+
+        # Convert to a tensor
+        filtered = torch.tensor(output)
+
         log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
         padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
         synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
         print("---------------")
-        print(log_probs[0].tolist())
+        print(log_probs[0])
         print(log_probs.shape)
-        
-        print(flattened[0].tolist())
-        print(flattened.shape)
-        
-        print(filtered[0].tolist())
+        print(filtered[0])
         print(filtered.shape)
-        
-        print(log_probs_softmaxed[0].tolist())
+        print(log_probs_softmaxed[0])
         print(log_probs_softmaxed.shape)
-        
-        print(synthetic_softmaxed_logits[0].tolist())
+        print(synthetic_softmaxed_logits[0])
         print(synthetic_softmaxed_logits.shape)
-        print("###############")
         # which expert classifies:
         # Find the highest probability per expert for each sample
         max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]
