@@ -55,11 +55,10 @@ class MoE_SEED(nn.Module):
         self.use_multivariate = args.use_multivariate
         self.selection_method = args.selection_method
         self.empty_expert = {}
-        self.tau = 1.0 # Muss in args rein
-        self.classification = args.classification # average/bayes # Trash
+        self.tau = args.tau # Muss in args rein
         self.kd = args.kd # muss am ende Weg?
         self.logger = None
-        self.kl_div_test = args.kl_div_test
+        self.selection_criterion = args.selection_criterion
         self.task_winning_expert = []
 
     @torch.no_grad()
@@ -135,7 +134,7 @@ class MoE_SEED(nn.Module):
                     param.requires_grad = False
             else:
                 param.requires_grad = True
-
+    
     def train_expert(self, train_dataset=None):
         # initialise expert from empty_expert
         for name, param in self.backbone.named_parameters():
@@ -161,7 +160,6 @@ class MoE_SEED(nn.Module):
 
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
-            print(f"Training epoch {epoch}")
             running_loss = 0.0
             #num_train_loader = len(train_loader)
             #pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
@@ -198,29 +196,7 @@ class MoE_SEED(nn.Module):
 
     @torch.no_grad()
     def forward(self, x):
-        if self.classification == 'average':
-            return self.forward_average(x)
-        elif self.classification == 'bayesian':
-            return self.forward_bayes(x)
-        else:
-            raise ValueError('Invalid classification method')
-
-    @torch.no_grad()
-    def forward_average(self, x): # Trash
-        features = []
-        for expert_index in range(len(self.experts)):
-            self.switch_to_expert(expert_index)
-            out = self.backbone(x)
-            features.append(out)
-
-        # Stack the features to get a tensor of shape (1, num_experts, logits_of_classes)
-        features = torch.stack(features, dim=1)        
-        # Compute the mean along the num_experts dimension (dimension 1)
-        average_logits = torch.mean(features, dim=1)
-        # Squeeze the tensor to remove the singleton dimension
-        average_logits = average_logits.squeeze(0)
-        
-        return average_logits
+        return self.forward_bayes(x)
 
     @torch.no_grad()
     def forward_bayes(self, x):
@@ -247,9 +223,9 @@ class MoE_SEED(nn.Module):
         elif self.selection_method == 'inv_eucld_dist':
             return self.selection_euclidean_distance(train_dataset, inverted=True)
         elif self.selection_method == 'kl_div':
-            return self.selection_kl_divergence(train_dataset, test=self.kl_div_test)
+            return self.selection_kl_divergence(train_dataset)
         elif self.selection_method == 'inv_kl_div':
-            return self.selection_kl_divergence(train_dataset, inverted=True, test=self.kl_div_test)
+            return self.selection_kl_divergence(train_dataset, inverted=True)
         elif self.selection_method == 'ws_div':
             return self.selection_ws_divergence(train_dataset)
         elif self.selection_method == 'inv_ws_div':
@@ -258,6 +234,17 @@ class MoE_SEED(nn.Module):
             raise ValueError('Invalid selection method')
         # muss man bei beiden Divergenzen .argmin() oder .argmax() am Ende nehmen? In SEED wird bei KL Divergenz .argmax() genommen, aber was ist mit Wasserstein?
         # geiches gilt für Euclidean Distance. Copilot nimmt bei WS und Eucl .argmin(). Ich wegen SEED Logik erstmal .argmax().
+
+    def calc_selection_criterion(self, t):
+        test = self.selection_criterion
+        if test == 0: # normal
+            return torch.mean(t)
+        elif test == 1:
+            return torch.min(t)
+        elif test == 2:
+            return torch.max(t)
+        else:
+            raise ValueError('Invalid selection criterium')
 
     def selection_random(self):
         # Randomly choose an expert to finetune
@@ -281,14 +268,14 @@ class MoE_SEED(nn.Module):
                     euclidean_dist = torch.cdist(new_gauss.unsqueeze(0), old_gauss.unsqueeze(0), p=2).item()
                     euclidean_matrix[n, o] = euclidean_dist
 
-            experts_mean_euclidean_dist[expert_index] = torch.mean(euclidean_matrix)
+            experts_mean_euclidean_dist[expert_index] = self.calc_selection_criterion(euclidean_matrix)
         if inverted:
             exp_to_finetune = torch.argmin(experts_mean_euclidean_dist)
         else:
             exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
         return exp_to_finetune
 
-    def selection_kl_divergence(self, train_dataset, inverted=False, test=0):
+    def selection_kl_divergence(self, train_dataset, inverted=False):
         # KL divergence between the current task distribution and the distributions of the experts
         print("########### Kl_div ########")
 
@@ -304,79 +291,10 @@ class MoE_SEED(nn.Module):
                 new_gauss = MultivariateNormal(new_gmm.mu.data[0][0], covariance_matrix=new_gmm.var.data[0][0])
                 for o, old_gmm in enumerate(learned_distributions):
                     old_gauss = MultivariateNormal(old_gmm.mu.data[0][0], covariance_matrix=old_gmm.var.data[0][0])
-                    
-                    #
-                    '''
-                    print(++++++++++++++++++++++++++++)
-                    print(new_gmm.var.data[0][0].shape)
-                    print(new_gmm.var.data[0][0])
-                    print(new_gmm.mu.data[0][0].shape)
-                    print(new_gmm.mu.data[0][0])
-                    print(++++++++++++++++++++++++++++)
-
-                    new_gmm = torch.full((1, 1, 10), 10.)
-                    new_cov = torch.eye(10) * 0.1
-                    new_gauss = MultivariateNormal(new_gmm[0][0], covariance_matrix=new_cov)
-
-
-                    old_gmm1 = torch.full((1, 1, 10), 5.)
-                    old_cov1 = torch.eye(10) * 0.1
-                    old_gauss1 = MultivariateNormal(old_gmm1[0][0], covariance_matrix=old_cov1)
-
-                    old_gmm2 = torch.full((1, 1, 10), 10.)
-                    old_cov2 = torch.eye(10) * 0.1
-                    old_gauss2 = MultivariateNormal(old_gmm2[0][0], covariance_matrix=old_cov2)
-
-                    old_gmm3 = torch.full((1, 1, 10), 15.)
-                    old_cov3 = torch.eye(10) * 0.1
-                    old_gauss3 = MultivariateNormal(old_gmm3[0][0], covariance_matrix=old_cov3)
-
-                    old_gmm4 = torch.full((1, 1, 10), 20.)
-                    old_cov4 = torch.eye(10) * 0.1
-                    old_gauss4 = MultivariateNormal(old_gmm4[0][0], covariance_matrix=old_cov4)
-
-                    kl_div1 = torch.distributions.kl_divergence(new_gauss, old_gauss1)
-                    kl_div2 = torch.distributions.kl_divergence(new_gauss, old_gauss2)
-                    kl_div3 = torch.distributions.kl_divergence(new_gauss, old_gauss3)
-                    kl_div4 = torch.distributions.kl_divergence(new_gauss, old_gauss4)
-
-                    kl_div5 = torch.distributions.kl_divergence(old_gauss1, new_gauss)
-                    kl_div6 = torch.distributions.kl_divergence(old_gauss2, new_gauss)
-                    kl_div7 = torch.distributions.kl_divergence(old_gauss3, new_gauss)
-                    kl_div8 = torch.distributions.kl_divergence(old_gauss4, new_gauss)
-
-                    print("KL Divergence(new, old)")
-                    print(f"KL Divergence 1: {kl_div1}")
-                    print(f"KL Divergence 2: {kl_div2}")
-                    print(f"KL Divergence 3: {kl_div3}")
-                    print(f"KL Divergence 4: {kl_div4}")
-
-                    print("KL Divergence(old, new)")
-                    print(f"KL Divergence 1: {kl_div5}")
-                    print(f"KL Divergence 2: {kl_div6}")
-                    print(f"KL Divergence 3: {kl_div7}")
-                    print(f"KL Divergence 4: {kl_div8}")
-
-
-                    exit(0)
-                    '''
-                    #
-
                     kl_div = torch.distributions.kl_divergence(new_gauss, old_gauss) # KL divergence between the current task distribution and the distributions of the experts (of each class)
                     kl_matrix[n, o] = kl_div
                     
-            if test == 0: # normal
-                experts_mean_kl_div[expert_index] = torch.mean(kl_matrix)
-                print("Normal kl_div")
-            elif test == 1: # test 1
-                experts_mean_kl_div[expert_index] = torch.min(kl_matrix)
-                print("Min kl_div")
-            elif test == 2: # test 2
-                experts_mean_kl_div[expert_index] = torch.max(kl_matrix)
-                print("Max kl_div")
-            else:
-                pass
-            
+            experts_mean_kl_div[expert_index] = self.calc_selection_criterion(kl_matrix)            
             print(f"Expert: {expert_index}")
             #print("Rounded Kl Matrix:")
             #print(kl_matrix.to(torch.int))
@@ -394,7 +312,7 @@ class MoE_SEED(nn.Module):
         else:
             exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
         return exp_to_finetune        
-
+    
     def selection_ws_divergence(self, train_dataset, inverted=False):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
         experts_mean_ws_div = torch.zeros(self.max_experts, device=self.device)
@@ -413,7 +331,7 @@ class MoE_SEED(nn.Module):
                     ws_div = wasserstein_distance(new_gauss, old_gauss)
                     ws_matrix[n, o] = ws_div
 
-            experts_mean_ws_div[expert_index] = torch.mean(ws_matrix)
+            experts_mean_ws_div[expert_index] = self.calc_selection_criterion(ws_matrix)
         if inverted:
             exp_to_finetune = torch.argmin(experts_mean_ws_div)
         else:
@@ -562,80 +480,13 @@ class MoE_SEED(nn.Module):
             assert gmm_shape[2] == model.num_features
 
             gmms.append(gmm)
-            #
-            rrr = list()
-            print(f"Shape of class features: {class_features.shape}")
-            for c in class_features:
-                rrr.append(gmm.score_samples(c))
-            print(rrr)
-            exit(0)
-            #
         return gmms
 
     @torch.no_grad()
     def eval(self):
         self.backbone.eval()
 
-    def predict_class_bayes_new(self, features):
-        all_distr = list()
-        #
-        """
-        # test
-        self.experts_distributions[0] = [1, [], 3, []]
-        self.experts_distributions.append([[], 2, [], []])
-        self.experts_distributions.append([[], [], [], 4])
-        
-        #
-        for _class in range(len(self.experts_distributions[0])):
-            for expert_distr in self.experts_distributions:
-                distr = expert_distr[_class]
-                if distr == list():
-                    pass
-                else:
-                    all_distr.append(distr)
-    
-        print(self.experts_distributions)
-        print(all_distr)
-        """
-        # classification: gleiches mit den echten distrs m,achen und dann einfach ne matrix mit den samples und den klassen distrs (gmms). es muss ja ansich nicht nach experte aufgeteilt werden.
-        # selection: runn (https://wandb.ai/belaschindler-university-hamburg/Test%20project/runs/u89ipbvk/overview) angucken und dann sehen wo es mit der kl_div schief ging
-        all_class_distr = list()
-        for _class in range(len(self.experts_distributions[0])):
-            for expert_distr in self.experts_distributions:
-                distr = expert_distr[_class]
-                if distr == list():
-                    pass
-                else:
-                    all_class_distr.append(distr)
-                
-        fill_value = -1e8
-        log_probs = torch.full((features.shape[0], len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
-        # shape: (batch_size, num_classes/num_distr.) 
-        
-        for c, class_gmm in enumerate(all_class_distr):
-            probs = class_gmm.score_samples(features)
-            print(f"Class {c}:")
-            print(probs.shape)
-            print(probs)
-            log_probs[:, c] = probs
-        time.sleep(3)    
-        log_probs_softmaxed = torch.softmax(log_probs/self.tau, dim=1) # tau? x= filtered/self.tau
-
-        padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
-        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0)
-        #print(log_probs.shape)
-        #print(log_probs) #### !!!!!!!!!!!!!!!!! wieso hat jedes bild die gleiche wahrscheinlichkeit?  featueshape ist [batchsize, experts, features], wird das beachtet(es wird momentan immer nur der erste experte gefrag. der weiß ja aber ncihts vom zweiten task)?? muss doch 3d gemach werden, oder lieber das kriterium berechnen und das dann speichern(wenn das geht)? wie entscheide ich mich für einen experten oder nehme ich den durchschnitt? Wie macht das SEED?
-        #print("---")
-        #print(log_probs_softmaxed)
-        #print("---")
-        #print(padding)
-        #print("---")
-        #print(synthetic_softmaxed_logits)
-        #print(synthetic_softmaxed_logits.shape)
-        #print(str(synthetic_softmaxed_logits[0]))
-        #print("---")
-        return synthetic_softmaxed_logits
-    
+    #@profile
     def predict_class_bayes(self, features):
         #print("##### Classification (predict_class_bayes) ######")
         fill_value = -1e8
@@ -652,10 +503,7 @@ class MoE_SEED(nn.Module):
                     #print(f"Probs Shape: {probs.shape}")
                     log_probs[:, expert_index, c] = probs
         #print("### Bayes ###")
-        # Initialize the output tensor, which will store the result
-        # The output tensor should have the same number of columns but the number of rows will be reduced.
         output = []
-
         # Loop through the first dimension (along the 2D slices)
         for i in range(log_probs.shape[0]):
             # For each row in the slice (2D array), remove the fill_value (-1e8)
@@ -670,21 +518,24 @@ class MoE_SEED(nn.Module):
             
             output.append(row_result)  # Add the processed row to the output
 
+
         # Convert to a tensor
         filtered = torch.tensor(output)
 
         log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
         padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
         synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
-        print("---------------")
-        print(log_probs[0])
-        print(log_probs.shape)
-        print(filtered[0])
-        print(filtered.shape)
-        print(log_probs_softmaxed[0])
-        print(log_probs_softmaxed.shape)
-        print(synthetic_softmaxed_logits[0])
-        print(synthetic_softmaxed_logits.shape)
+        #print("---------------")
+        #print(log_probs[0])
+        #print(log_probs.shape)#
+        #print(f"Log_probs of first sample of batch: {filtered[0]}")
+        #print(filtered.shape)
+        #print(log_probs_softmaxed[0])
+        #print(log_probs_softmaxed.shape)
+        #print(synthetic_softmaxed_logits[0])
+        #print(synthetic_softmaxed_logits.shape)
+        #print("---------------")
+
         # which expert classifies:
         # Find the highest probability per expert for each sample
         max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]

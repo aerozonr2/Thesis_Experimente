@@ -173,9 +173,16 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
     results = {}
     for i, test_dataset in enumerate(data_manager.test_iter(up_to_task)):
         print(f"######## Evaluating task {i} ########")
+        start_time = time.time()
+
         task_res = eval_dataset(model, test_dataset, args)
         results[i] = task_res
         num_samples[i] = len(test_dataset)
+
+        end_time = time.time()
+        runtime = round(end_time - start_time, 4)
+        print(f"Runtime {runtime} seconds")
+        Logger.instance().log({"Task evaluation runtime": runtime})
 
     # convert to formated string
     final_results = {
@@ -200,7 +207,19 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
             [v[key] for v in results.values()],
             weights=[num_samples[k] for k in results],
         )
-
+    """
+    print("--- GMM Parameters:")
+    for expert_index in range(len(model.experts_distributions)):
+        for class_index in range(len(model.experts_distributions[expert_index])):
+            if model.experts_distributions[expert_index][class_index] == []:
+                continue
+            print(f"Expert {expert_index}, Class {class_index}:")
+            print(f"Mean mean: {model.experts_distributions[expert_index][class_index].mu.data[0][0].mean():.6f}")
+            print(f"Mean shape: {model.experts_distributions[expert_index][class_index].mu.data.shape}")
+            print(f"Covariance mean: {model.experts_distributions[expert_index][class_index].var.data[0][0].mean():.6f}")
+            print(f"Covariance shape: {model.experts_distributions[expert_index][class_index].var.data.shape}")
+    print("-------------")
+    """
     return final_results
 
 
@@ -222,8 +241,8 @@ def eval_dataset(model, dataset, args):
         x = x.to(args.device)
         y = y.to(args.device)
         y_hat = model(x)
-        print(f"--- Real label: {y.tolist()[0]}")
-        print("###############")
+        #print(f"--- Real label: {y.tolist()[0]}")
+        #print("###############")
 
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
@@ -381,7 +400,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         if args.log_gpustat:
             log_gpustat()
         train_dataset.transform = train_transform
-        print(f"# Task {t}")
+        print(f"################## Task {t} ##################")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
@@ -413,7 +432,12 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
         
         if args.exit_after_T != 0:
             if t == args.exit_after_T:
-                print(f"Finished after T={args.exit_after_T}")
+                print(f"Exited after T={args.exit_after_T}")
+                wandb_finish()
+                sys.exit()
+        if args.exit_after_acc != 0:
+            if float(eval_res["task_mean/acc"]) <= args.exit_after_acc:
+                print(f"Exited after acc={args.exit_after_acc}")
                 wandb_finish()
                 sys.exit()
 
@@ -459,7 +483,6 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     same_shift = torch.equal(test_ssf_shift, model.backbone.blocks[0].mlp.fc1_shift)
     print(f"Initial shift and modified shift are the same: {same_shift}")
     """
-
 
 
 def main(args):
@@ -570,13 +593,14 @@ if __name__ == "__main__":
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
     parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
-    parser.add_argument('--classification', type=str, default='bayesian', choices=['average', "bayesian"]) 
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
     parser.add_argument('--kd_alpha', help='Alpha for knowledge distillation', default=0.99, type=float)
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
     parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)
     parser.add_argument('--exit_after_T', help='finish run after T=?', default=0, type=int)
-    parser.add_argument('--kl_div_test', help='test', default=0, type=int, choices=[0, 1, 2])
+    parser.add_argument('--selection_criterion', help='mean, min, max', default=0, type=int, choices=[0, 1, 2])
+    parser.add_argument('--tau', help='In softmax', default=1.0, type=float)
+    parser.add_argument('--exit_after_acc', help='finish run after acc=?', default=0.0, type=float)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -612,25 +636,35 @@ if __name__ == "__main__":
         print(f"Skipping run: dataset={args.dataset}, T={args.T} is too large")
         wandb_finish()
         exit(0)
-    '''
-    # Cifar100 wird zu oft gemacht
-    if args.dataset == "cifar100":
-        print(f"Skipping run: dataset={args.dataset}, should not be used")
-        wandb_finish()
-        exit(0)
-    '''
+    
 
     if torch.cuda.device_count() > 1:
         print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py --...")
         sys.exit()
 
+    if args.selection_method == "around" and args.selection_criterion != 0:
+        print("Selection method 'around' not compatible with selection_criterion")
+        try:
+            wandb_finish()
+        except:
+            pass
+        exit(0)
+        
+    if args.selection_method == "random" and args.selection_criterion != 0:
+        print("Selection method 'random' not compatible with selection_criterion")
+        try:
+            wandb_finish()
+        except:
+            pass
+        exit(0)
 
 
-    #display_profile('cProfile/profile_output3.prof')
+    #display_profile('cProfile/vtab3.prof')
+    #exit(0)
     #assert False
-    #cProfile.run('main(args)', 'cProfile/runtime_optim.prof')
+    #cProfile.run('main(args)', 'cProfile/vtab4.prof')
     #print("#################")
-    #display_profile('cProfile/runtime.prof')
+    #display_profile('cProfile/vtab1.prof')
     #display_profile('cProfile/runtime_optim.prof')
 
     main(args)

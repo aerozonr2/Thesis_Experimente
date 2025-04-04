@@ -15,7 +15,7 @@ parameters:
     min: 0.001
     max: 0.01
   dataset:
-    values: ["dataset"]
+    values: ["cifar100", "imagenetr", "cub", "dil_imagenetr", "imageneta", "vtab", "cars", "omnibenchmark", "limited_domainnet"] # kein cddb
   finetune_method:
     values: ["adapter", "vpt", "ssf"] # SSF braucht andere Python/Modul-Versionen
   finetune_epochs:

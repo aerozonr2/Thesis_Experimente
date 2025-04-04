@@ -67,7 +67,7 @@ def optimize_args(args):
         "limited_domainnet": "vit_base_patch16_224",
         "cddb": "vit_base_patch16_224" # not checked yet
     }
-    args.backbone = opm_backbone[args.dataset]
+    #args.backbone = opm_backbone[args.dataset]
 
     
     return args
