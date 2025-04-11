@@ -9,7 +9,7 @@ parameters:
     min: 0.0000001
     max: 0.005
   dataset:
-    values: ["vtab"]
+    values: ["imageneta"]
   finetune_method:
     values: ["adapter", "vpt"]
   finetune_epochs:

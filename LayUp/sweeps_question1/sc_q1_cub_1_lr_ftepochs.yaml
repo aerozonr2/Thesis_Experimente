@@ -5,26 +5,26 @@ metric:
   goal: maximize
 parameters:
   lr:
-    distribution: log_uniform_values
-    min: 0.0000001
-    max: 0.005
+    distribution: uniform
+    min: 0.00001
+    max: 0.2  
   dataset:
-    values: ["vtab"]
+    values: ["cub"]
   finetune_method:
-    values: ["adapter", "vpt"]
+    values: ["vpt"]
   finetune_epochs:
-    values: [10]
+    distribution: int_uniform
+    min: 1
+    max: 30
   moe_max_experts:
     values: [5]
-  reduce_dataset:
-    values: [1]
   T:
     values: [10]
+  backbone:
+    values: ["vit_base_patch16_224"]
   sweep_logging:
     values: [True]
   kd:
     values: [False]
-  seed :
-    distribution: int_uniform
-    min: 0
-    max: 1000
+  selection_method:
+    values: ["around"]

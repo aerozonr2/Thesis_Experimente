@@ -148,11 +148,11 @@ class GaussianMixture(torch.nn.Module):
                 device = self.mu.device
                 # When the log-likelihood assumes unbound values, reinitialize model
                 self.__init__(self.n_components,
-                              self.n_features,
-                              covariance_type=self.covariance_type,
-                              mu_init=self.mu_init,
-                              var_init=self.var_init,
-                              eps=self.eps)
+                                self.n_features,
+                                covariance_type=self.covariance_type,
+                                mu_init=self.mu_init,
+                                var_init=self.var_init,
+                                eps=self.eps)
                 for p in self.parameters():
                     p.data = p.data.to(device)
                 if self.init_params == "kmeans":
@@ -436,7 +436,26 @@ class GaussianMixture(torch.nn.Module):
         min_cost = np.inf
 
         for i in range(init_times):
-            tmp_center = x[np.random.choice(np.arange(x.shape[0]), size=n_centers, replace=False), ...]
+            #
+            
+            # Inside get_kmeans_mu, replace the np.random.choice line with:
+            n_samples = x.shape[0]
+            if n_samples >= n_centers:
+                # Use torch.randperm which respects torch.manual_seed
+                indices = torch.randperm(n_samples, device=x.device)[:n_centers]
+                tmp_center = x[indices, ...]
+            else:
+                # Handle cases where you have fewer samples than centers if necessary
+                # Maybe repeat samples or raise an error, depending on desired behavior
+                print(f"Warning: K-Means requested {n_centers} centers but only {n_samples} samples available.")
+                # Example: Use all available samples and repeat if needed
+                indices = torch.arange(n_samples, device=x.device)
+                if n_centers > n_samples:
+                    indices = indices.repeat( (n_centers + n_samples - 1) // n_samples )[:n_centers]
+                tmp_center = x[indices, ...]
+            
+            # The rest of the k-means loop can likely stay the same
+            #tmp_center = x[np.random.choice(np.arange(x.shape[0]), size=n_centers, replace=False), ...]
             l2_dis = torch.norm((x.unsqueeze(1).repeat(1, n_centers, 1) - tmp_center), p=2, dim=2)
             l2_cls = torch.argmin(l2_dis, dim=1)
 

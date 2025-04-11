@@ -54,6 +54,14 @@ def optimize_args(args):
     else:
         print("Batch size can't be optimized for the current configuration.")
 
+    # GPU memory 16GB:
+    """
+    gpu_memory = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
+    if gpu_memory >= 16 * 1000**3:
+        args.batch_size += 8
+        if args.dataset in ["vtab"]:
+            args.batch_size += 8
+    """
     # Backbones
     opm_backbone = {
         "cifar100": "vit_base_patch16_224",

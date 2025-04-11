@@ -12,6 +12,7 @@ import time
 import sys
 import json
 import subprocess
+from torch import nn
 
 
 import wandb
@@ -179,6 +180,7 @@ def eval_datamanager(model, data_manager: CILDataManager, up_to_task: int, args)
         results[i] = task_res
         num_samples[i] = len(test_dataset)
 
+        print(f"Num samples: {num_samples[i]}")
         end_time = time.time()
         runtime = round(end_time - start_time, 4)
         print(f"Runtime {runtime} seconds")
@@ -241,8 +243,62 @@ def eval_dataset(model, dataset, args):
         x = x.to(args.device)
         y = y.to(args.device)
         y_hat = model(x)
+        #
+        only_one_class = False
+        max_probs, _ = torch.max(y_hat, dim=1)
+        sorted_tensor, sorted_index = torch.sort(y_hat, dim=1, descending=True)
+        try:
+            second_largest = sorted_tensor[:, 1]
+            sorted_index = sorted_index[:, 1]
+        except:
+            only_one_class = True
+        #print(f"Batch size: {x.shape[0]}")
+        unique_labels = torch.unique(y)
+
+        mean_max_probs = {}
+        for label in unique_labels:
+            label_indices = (y == label).nonzero(as_tuple=True)[0]
+            label_indices = label_indices.to(y_hat.device)  # Move indices to the same device as logits
+            #print(f"Label indices: {label_indices}")
+
+            probs_for_label = max_probs[label_indices]
+            #print(f"Probs for label {label.item()}: {probs_for_label}")
+            if not only_one_class:
+                second_largest_for_label = second_largest[label_indices]
+                sorted_index_for_label = sorted_index[label_indices]
+
+            # Move back to CPU for the final mean calculation as dictionaries are CPU-based
+            mean_prob = probs_for_label.cpu().mean().item() if probs_for_label.numel() > 0 else 0.0
+            #print(f"Mean prob for label {label.item()}: {mean_prob}")
+            if not only_one_class:
+                mean_second_largest = second_largest_for_label.cpu().mean().item() if second_largest_for_label.numel() > 0 else 0.0
+
+            mean_max_probs[label.item()] = mean_prob
+
+            #print(f"Mean max prob for label {label.item()}: {mean_max_probs[label.item()]}")
+            if not only_one_class:
+                mean_max_probs["second highest prob."] = mean_second_largest
+                mean_max_probs["second highest class"] = sorted_index_for_label.cpu().tolist()
+        
+        pred_classes = torch.argmax(y_hat, dim=1).tolist()
+        if pred_classes != y.tolist():
+            #print(y_hat[0].tolist())
+            #print("********")
+            print(y.tolist())
+            print(pred_classes)
+            print(mean_max_probs)
+            print(f"Class prob. means{torch.mean(y_hat, dim=0).tolist()}")
+            
+        #print(y_hat)
+        #print(y_hat.shape)
+        log_probs_softmaxed = torch.softmax(y_hat, dim=1).int()
+        padding = (0, model.num_classes - log_probs_softmaxed.shape[1])
+        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
+        y_hat = synthetic_softmaxed_logits
         #print(f"--- Real label: {y.tolist()[0]}")
         #print("###############")
+        
+        #print("--- Batch End ---\n")
 
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
@@ -430,7 +486,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
             sys.exit()
         '''
         
-        if args.exit_after_T != 0:
+        if args.exit_after_T != 1000:
             if t == args.exit_after_T:
                 print(f"Exited after T={args.exit_after_T}")
                 wandb_finish()
@@ -443,10 +499,15 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
 
 
     # Save experts
-    #print("Saving experts")
-    #model.save_experts_to_state_dict("local_experts/experts_good.pth")
-    #model.save_experts_to_state_dict("local_experts/experts_test.pth")
-
+    if float(eval_res["task_mean/acc"]) >= 0.7:
+        model.save_experts_to_state_dict(f"local_experts/{args.dataset}_gut.pth")
+    elif float(eval_res["task_mean/acc"]) >= 0.6:
+        print("Saving experts")
+        #model.save_experts_to_state_dict("local_experts/experts_good.pth")
+        model.save_experts_to_state_dict(f"local_experts/{args.dataset}_okay.pth")
+    else:
+        pass
+        # lohnt sich nicht
 
         # VPT ist Deep wegen den 12 Layern, Es wird aber nur das erste benutzt. 12 Layer x 10 vpt_prompt_token_num x 768 embed_dim = VTP Tokens
         # ein experte so viel wie fsa benutzt 10 tokens, nicht 5, wie Kyra das meinte
@@ -500,8 +561,6 @@ def main(args):
     train_base_dataset = shrink_dataset(train_base_dataset, fraction, num_images_per_class=num_images_per_class)
     test_base_dataset = shrink_dataset(test_base_dataset, fraction, num_images_per_class=num_images_per_class / 2)
     print(f"Reduced dataset size. Fraction {fraction}")
-
-
 
     # get datamanager based on ds
     data_manager = None
@@ -571,7 +630,7 @@ if __name__ == "__main__":
         default="vpt",
         choices=["none", "adapter", "ssf", "vpt"],
     )
-    parser.add_argument("--finetune_epochs", type=int, default=1)
+    parser.add_argument("--finetune_epochs", type=int, default=10)
     parser.add_argument("--k", type=int, default=6)
 
     # misc
@@ -579,6 +638,7 @@ if __name__ == "__main__":
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
     )
     parser.add_argument("--seed", type=int, default=1993)
+    #parser.add_argument("--seed", type=int, default=random.randint(0, 10000))
     parser.add_argument(
         "--data_root",
         type=str,
@@ -591,16 +651,17 @@ if __name__ == "__main__":
     parser.add_argument("--moe_max_experts", type=int, default=5)
     parser.add_argument("--reduce_dataset", default=1.0, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
-    parser.add_argument('--use_multivariate', help='Use multivariate distribution', action='store_true', default=True)
-    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="kl_div", choices=["random", "around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
+    parser.add_argument('--use_multivariate', help='Use multivariate distribution',type=int, default=0)
+    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="around", choices=["random", "around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
     parser.add_argument('--kd_alpha', help='Alpha for knowledge distillation', default=0.99, type=float)
-    parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=True)
+    parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=False)
     parser.add_argument('--sweep_logging', help='If you use a wandb sweep turn on for logging', default=False, type=bool)
-    parser.add_argument('--exit_after_T', help='finish run after T=?', default=0, type=int)
+    parser.add_argument('--exit_after_T', help='finish run after T=?', default=1000, type=int)
     parser.add_argument('--selection_criterion', help='mean, min, max', default=0, type=int, choices=[0, 1, 2])
     parser.add_argument('--tau', help='In softmax', default=1.0, type=float)
     parser.add_argument('--exit_after_acc', help='finish run after acc=?', default=0.0, type=float)
+    parser.add_argument('--trash_var', help='Does nothing', default=0.0, type=float)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -640,6 +701,7 @@ if __name__ == "__main__":
 
     if torch.cuda.device_count() > 1:
         print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py --...")
+        # print all cuda visible devices ids
         sys.exit()
 
     if args.selection_method == "around" and args.selection_criterion != 0:

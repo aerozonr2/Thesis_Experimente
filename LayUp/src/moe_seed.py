@@ -6,7 +6,7 @@ from .backbone.adapter import add_adapters
 from .backbone.ssf import add_ssf
 from .backbone.vpt import add_vpt
 from .backbone.util import call_in_all_submodules
-from .approach.mvgb import ClassMemoryDataset, ClassDirectoryDataset
+#from .approach.mvgb import ClassMemoryDataset, ClassDirectoryDataset
 from .approach.gmm import GaussianMixture
 from scipy.stats import wasserstein_distance
 
@@ -32,6 +32,56 @@ from torch.distributions import MultivariateNormal
 #from .incremental_learning import Inc_Learning_Appr
 
 #torch.backends.cuda.matmul.allow_tf32 = False
+
+def check_backbone_frozen(model: torch.nn.Module, i=None) -> None:
+    """
+    Checks if the backbone parameters of a timm ViT model are frozen.
+
+    Args:
+        model (torch.nn.Module): The timm ViT model.
+    """
+
+    backbone_modules = [model.patch_embed, model.blocks]  # Common backbone modules in ViT
+
+    for name, param in model.named_parameters():
+        is_backbone_param = False
+        for backbone_module in backbone_modules:
+            if any(module_name in name for module_name in [n for n, _ in backbone_module.named_modules()]):
+                is_backbone_param = True
+                break  # No need to check other backbone modules
+
+        if is_backbone_param:
+            if param.requires_grad:
+                print(f"{i} ERROR: Backbone parameter {name} is trainable!")
+            else:
+                pass
+        else:
+            if param.requires_grad:
+                print(f"{i} TRAINABLE: Non-backbone parameter {name} is trainable.")
+            else:
+                print(f"{i} FROZEN: Non-backbone parameter {name} is frozen (unexpected?).")
+
+def check_expert_params(model: torch.nn.Module, i=None) -> None:
+    """
+    Prints first and last 10 parameters of the VPT tokens in a timm ViT model.
+    Prints first and last 10 parameters of the head in a timm ViT model.
+
+    Args:
+        model (torch.nn.Module): The timm ViT model.
+    """
+    for name, param in model.named_parameters():
+        if "vpt_prompt_tokens" in name:
+            print(f"********** VPT tokens {name}: **********")
+            print(f"First 10 parameters: {param.data[:10]}")
+            print(f"Last 10 parameters: {param.data[-10:]}")
+            print(f"Shape: {param.shape}")
+            print(f"############# {i} #############")
+        elif "head" in name:
+            print(f"********** Head {name}: **********")
+            print(f"First 10 parameters: {param.data[:10]}")
+            print(f"Last 10 parameters: {param.data[-10:]}")
+            print(f"Shape: {param.shape}")
+            print(f"############# {i} #############")
 
 
 class MoE_SEED(nn.Module):
@@ -110,7 +160,7 @@ class MoE_SEED(nn.Module):
                     self.experts_distributions[choosen_expert_index].append(gmm)
                 else:
                     self.experts_distributions[expert_index].append([])
-
+        
     def freeze_ViT_unfreeze_PEFT(self, model=None):
         # Freeze the backbone parameters based on names except for the head
         # Model as parameter
@@ -141,15 +191,12 @@ class MoE_SEED(nn.Module):
             if name in self.empty_expert:
                 param.data.copy_(self.empty_expert[name])
 
-
         # Add a linear head at the end of the network
         num_features = self.backbone.num_features
         num_classes = self.num_classes
         self.backbone.head = nn.Linear(num_features, num_classes)
-
         # Freeze the backbone parameters based on names except for the head
         self.freeze_ViT_unfreeze_PEFT()
-
         model = self.backbone
         model.train()
 
@@ -158,7 +205,7 @@ class MoE_SEED(nn.Module):
         # Train model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
 
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             running_loss = 0.0
             #num_train_loader = len(train_loader)
@@ -173,7 +220,6 @@ class MoE_SEED(nn.Module):
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
-
 
         # Save Expert parameters
         expert_parameters = {}
@@ -342,7 +388,6 @@ class MoE_SEED(nn.Module):
         self.switch_to_expert(expert_index)
         old_model = copy.deepcopy(self.backbone)
         old_model.eval()
-
         # Add a linear head at the end of the network
         num_features = self.backbone.num_features
         num_classes = self.num_classes
@@ -354,7 +399,7 @@ class MoE_SEED(nn.Module):
 
         # Finetune model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=2, pin_memory=True)
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             print(f"Finetune epoch {epoch}")
             model.train()
@@ -383,7 +428,6 @@ class MoE_SEED(nn.Module):
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
-
         # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
@@ -393,7 +437,6 @@ class MoE_SEED(nn.Module):
                 pass # Not saving backbone parameters
         self.experts[expert_index] = copy.deepcopy(expert_parameters)
         self.expert_heads[expert_index] = copy.deepcopy(self.backbone.head.state_dict())
-
     @torch.no_grad()
     def create_distributions(self, train_dataset, exp_index):
         """ 
@@ -467,9 +510,9 @@ class MoE_SEED(nn.Module):
                 except RuntimeError:
                     eps = 10 * eps
                 else:
-                    #print(f"WARNING: Covariance matrix is singular. Increasing eps from: {1e-8:.7f} to: {eps:.7f} but this may hurt results")   ###Muss später wieder rein
+                    print(f"WARNING: Covariance matrix is singular. Increasing eps from: {1e-8:.8f} to: {eps:.8f} but this may hurt results")   ###Muss später wieder rein
                     is_ok = True
-
+            print("GMM fitted")
             if len(gmm.mu.data.shape) == 2:
                 gmm.mu.data = gmm.mu.data.unsqueeze(1)
 
@@ -518,36 +561,21 @@ class MoE_SEED(nn.Module):
             
             output.append(row_result)  # Add the processed row to the output
 
-
         # Convert to a tensor
         filtered = torch.tensor(output)
-
-        log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
-        padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
-        synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
-        #print("---------------")
-        #print(log_probs[0])
-        #print(log_probs.shape)#
-        #print(f"Log_probs of first sample of batch: {filtered[0]}")
-        #print(filtered.shape)
-        #print(log_probs_softmaxed[0])
-        #print(log_probs_softmaxed.shape)
-        #print(synthetic_softmaxed_logits[0])
-        #print(synthetic_softmaxed_logits.shape)
-        #print("---------------")
-
+        #
+        #log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
+        #padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
+        #synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
+        
+        
         # which expert classifies:
-        # Find the highest probability per expert for each sample
         max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]
-        # Find which expert had the highest probability
         winning_expert = max_probs_per_expert.argmax(dim=1)  # Shape: [batchsize]
-        # Ensure integer type
         winning_expert = winning_expert.to(torch.int64)
         self.task_winning_expert.append(winning_expert)
 
-        #scores = filtered - filtered.max(dim=1, keepdim=True).values
-        #print(scores)
-        return synthetic_softmaxed_logits
+        return filtered
 
     def criterion(self, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""

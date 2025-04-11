@@ -1,0 +1,32 @@
+program: main.py
+method: bayes
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    distribution: uniform
+    min: 0.001
+    max: 0.1  
+  dataset:
+    values: ["imageneta"]
+  finetune_method:
+    values: ["vpt"]
+  finetune_epochs:
+    distribution: int_uniform
+    min: 1
+    max: 15
+  moe_max_experts:
+    values: [5]
+  T:
+    values: [10]
+  backbone:
+    values: ["vit_base_patch16_224"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  selection_method:
+    values: ["around"]
+  exit_after_acc:
+    values: [0.05]
