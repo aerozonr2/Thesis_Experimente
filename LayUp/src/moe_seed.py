@@ -509,8 +509,9 @@ class MoE_SEED(nn.Module):
                     gmm.fit(class_features, delta=1e-3, n_iter=100)
                 except RuntimeError:
                     eps = 10 * eps
-                else:
                     print(f"WARNING: Covariance matrix is singular. Increasing eps from: {1e-8:.8f} to: {eps:.8f} but this may hurt results")   ###Muss später wieder rein
+
+                else:
                     is_ok = True
             print("GMM fitted")
             if len(gmm.mu.data.shape) == 2:

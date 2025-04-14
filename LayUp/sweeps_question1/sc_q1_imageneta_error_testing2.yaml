@@ -11,7 +11,7 @@ parameters:
   dataset:
     values: ["imageneta"]
   finetune_method:
-    values: ["adapter", "vpt"]
+    values: ["vpt"]
   finetune_epochs:
     values: [10]
   moe_max_experts:
