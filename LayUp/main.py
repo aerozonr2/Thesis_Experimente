@@ -583,8 +583,8 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     # For faster computation
-    args = optimize_args(args)
-    print(f"Args optimized: {args}")
+    #args = optimize_args(args)
+    #print(f"Args optimized: {args}")
     
     setup_logger(args)
     
