@@ -6,24 +6,24 @@ metric:
 parameters:
   lr:
     distribution: log_uniform_values
-    min: 0.0000001
+    min: 0.00000001
     max: 0.005
   dataset:
-    values: ["imageneta"]
+    values: ["cifar100"]
   finetune_method:
-    values: ["adapter", "vpt"]
-  finetune_epochs:
-    values: [10]
-  moe_max_experts:
-    values: [5]
-  reduce_dataset:
-    values: [1]
-  T:
-    values: [10]
+    values: ["ssf"]
   sweep_logging:
     values: [True]
   kd:
-    values: [False]
+    values: [True, False]
+  kd_alpha:
+    distribution: uniform
+    min: 0.01
+    max: 0.99
+  tau:
+    distribution: uniform
+    min: 0.01
+    max: 0.99
   seed :
     distribution: int_uniform
     min: 0

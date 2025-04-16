@@ -1,0 +1,24 @@
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [] ###
+  dataset:
+    values: ["vtab"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  seed :
+    distribution: int_uniform
+    min: 0
+    max: 1000
+  selection_method:
+    values: ["around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"]
+  selection_criterion:
+    values: [0, 1, 2]

@@ -27,7 +27,6 @@ from torch.utils.data import DataLoader
 
 from src.backbone import get_backbone
 from src.modules import CosineLinear
-from src.layup import LayUP
 from src.moe_seed import MoE_SEED
 from src.data import (
     CILDataManager,
@@ -343,107 +342,6 @@ def eval_dataset(model, dataset, args):
     #return {"acc": acc, "expert_percentages": formatted_percentages}    
     return {"acc": acc}
 
-def use_layup(data_manager, train_transform, test_transform, args):
-    backbone = get_backbone(args.backbone, finetune_method=args.finetune_method)
-    model = LayUP(
-        backbone=backbone,
-        intralayers=args.intralayers,
-        num_classes=data_manager.num_classes,
-    )
-
-    model.to(args.device)
-    for t, (train_dataset, test_datatset) in enumerate(data_manager):
-        print(f"Task {t}")
-        print(f"Train dataset: {len(train_dataset)}")
-        print(f"Test dataset: {len(test_datatset)}")
-
-        # first session adaptation
-        if t == 0 and args.finetune_method != "none":
-            train_dataset.transform = train_transform
-            fsa(model, train_dataset, test_datatset, args)
-
-        model.freeze(fully=True)
-        model.eval()
-
-        train_dataset.transform = test_transform
-
-        # train Ridge regression
-        model.update_ridge(
-            DataLoader(
-                train_dataset,
-                batch_size=args.batch_size,
-                shuffle=False,
-                num_workers=2,
-                pin_memory=True,
-            )
-        )
-        
-        # eval on all tasks up to t
-        eval_res = eval_datamanager(model, data_manager, t, args)
-        # log results
-        Logger.instance().log(eval_res)
-
-    # Print model summary
-    """
-    Print an organized summary of the important parts of a Vision Transformer.
-    Includes patch embedding, transformer blocks, classification head,
-    parameters, and activation functions.
-    """
-    print("Vision Transformer Summary:")
-    print("=" * 40)
-    '''
-    # Patch embedding layer
-    print("Patch Embedding Layer:")
-    print(model.patch_embed)
-    print("-" * 40)
-    
-    # Transformer blocks
-    print("Transformer Blocks:")
-    for i, block in enumerate(model.blocks):
-        print(f"Block {i + 1}:")
-        print(f"  Attention: {block.attn}")
-        print(f"  MLP: {block.mlp}")
-        
-        # Extract activation functions in the MLP
-        activation_functions = [
-            layer.__class__.__name__ for layer in block.mlp.fc2.children() 
-            if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
-        ]
-        if not activation_functions:  # If no activations are direct children, check deeper
-            activation_functions = [
-                layer.__class__.__name__ for layer in block.mlp.children()
-                if isinstance(layer, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh))
-            ]
-        print(f"  Activation Functions: {', '.join(activation_functions) if activation_functions else 'None Found'}")
-    print("-" * 40)
-    
-    # Classification head
-    print("Classification Head:")
-    print(model.head)
-    print("-" * 40)
-    
-    # Parameters summary
-    print("Parameters Summary:")
-    for name, param in model.named_parameters():
-        print(f"{name}: {param.shape}")
-    print("-" * 40)
-    
-    # Activation functions
-    print("Activation Functions:")
-    activations = []
-    def find_activation_functions(module, activations):
-        for child in module.children():
-            if isinstance(child, (nn.ReLU, nn.GELU, nn.Sigmoid, nn.Tanh)):
-                activations.append(child.__class__.__name__)
-            else:
-                find_activation_functions(child, activations)
-        return activations
-    
-    activations = find_activation_functions(model)
-    print(", ".join(set(activations)))
-    print("=" * 40)
-    '''
-
 
 def wandb_finish():
     if len(Logger.instance()._backends) > 1 and isinstance(Logger.instance()._backends[1], WandbLogger):
@@ -510,11 +408,11 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
 
     # Save experts
     if float(eval_res["task_mean/acc"]) >= 0.7:
-        model.save_experts_to_state_dict(f"local_experts/{args.dataset}_gut.pth")
+        model.save_experts_to_state_dict(f"local_experts/gut_{args.dataset}_{args.backbone}.pth")
     elif float(eval_res["task_mean/acc"]) >= 0.6:
         print("Saving experts")
         #model.save_experts_to_state_dict("local_experts/experts_good.pth")
-        model.save_experts_to_state_dict(f"local_experts/{args.dataset}_okay.pth")
+        model.save_experts_to_state_dict(f"local_experts/okay_{args.dataset}_{args.backbone}.pth")
     else:
         pass
         # lohnt sich nicht
@@ -603,13 +501,8 @@ def main(args):
             "num_classes": data_manager.num_classes,
         }
     )
-    # LayUp
-    if args.approach == "layup":
-        print("Using LayUp")
-        use_layup(data_manager, train_transform, test_transform, args)
-    else:
-        print("Using MoE")
-        use_moe(data_manager, train_transform, test_transform, args)
+
+    use_moe(data_manager, train_transform, test_transform, args)
 
 
 if __name__ == "__main__":
@@ -648,7 +541,6 @@ if __name__ == "__main__":
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
     )
     parser.add_argument("--seed", type=int, default=1993)
-    #parser.add_argument("--seed", type=int, default=random.randint(0, 10000))
     parser.add_argument(
         "--data_root",
         type=str,
@@ -657,7 +549,6 @@ if __name__ == "__main__":
     )
 
     # Approach
-    parser.add_argument("--approach", type=str, default='moe', choices=['layup', 'moe'])
     parser.add_argument("--moe_max_experts", type=int, default=5)
     parser.add_argument("--reduce_dataset", default=1.0, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
@@ -710,7 +601,7 @@ if __name__ == "__main__":
     
 
     if torch.cuda.device_count() > 1:
-        print("Specify GPU with: CUDA_VISIBLE_DEVICES=1/2 python main.py --...")
+        print("Specify GPU with: CUDA_VISIBLE_DEVICES=d python main.py --...")
         # print all cuda visible devices ids
         sys.exit()
 
@@ -729,6 +620,8 @@ if __name__ == "__main__":
         except:
             pass
         exit(0)
+    if args.finetune_method == "ssf":
+        args.batch_size = 28
 
 
     #display_profile('cProfile/vtab3.prof')

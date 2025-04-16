@@ -1,0 +1,22 @@
+program: main.py
+method: bayes
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    distribution: log_uniform_values
+    min: 0.00001
+    max: 0.01
+  dataset:
+    values: ["cifar100"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  seed :
+    distribution: int_uniform
+    min: 0
+    max: 1000

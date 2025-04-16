@@ -10,6 +10,8 @@
 **/results/
 /LayUp/cProfile/
 .venv/
+venv/
+**/venv/
 /data/
 /SEED/
 
