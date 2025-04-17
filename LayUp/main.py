@@ -540,7 +540,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
     )
-    parser.add_argument("--seed", type=int, default=1993)
+    parser.add_argument("--seed", type=int, default=2001)
     parser.add_argument(
         "--data_root",
         type=str,
