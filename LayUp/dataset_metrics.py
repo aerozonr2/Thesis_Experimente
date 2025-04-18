@@ -13,15 +13,14 @@ import sys
 import json
 import subprocess
 from torch import nn
+from sklearn.model_selection import train_test_split
+import timm
+import numpy as np
+from tqdm import tqdm
 
 
 import wandb
-
-
-'''
-if torch.cuda.device_count() >= 2:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-'''
+from sklearn.metrics.pairwise import cosine_similarity
 
 from torch.utils.data import DataLoader
 
@@ -343,91 +342,6 @@ def eval_dataset(model, dataset, args):
     return {"acc": acc}
 
 
-def fsa(model, train_dataset, test_dataset, args):
-    model.freeze(fully=False)
-
-    fsa_head = CosineLinear(
-        in_features=model.backbone.num_features,
-        out_features=train_dataset.num_classes,
-        sigma=30,
-    ).to(args.device)
-
-    # set forward to use fsa head (instead of ridge)
-    model.forward = functools.partial(model.forward_with_fsa_head, head=fsa_head)
-
-    optimizer = torch.optim.AdamW(
-        [
-            {"params": model.backbone.parameters()},
-            {"params": fsa_head.parameters()},
-        ],
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.finetune_epochs, eta_min=0.0
-    )
-    scheduler.last_epoch = -1
-
-    dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=2,
-        pin_memory=True,
-    )
-
-    # sanity
-    # print all trainable parameters
-    print("Trainable parameters:")
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(name)
-    for name, param in fsa_head.named_parameters():
-        if param.requires_grad:
-            print("head." + name)
-
-    best_model_state_dict = None
-    best_acc = 0.0
-    epochs_no_improvement = 0
-
-    for epoch in range(args.finetune_epochs):
-        fsa_head.train()
-        model.train()
-        pbar = tqdm(dataloader, desc=f"Finetuning epoch {epoch}")
-        for x, y in pbar:
-            x = x.to(args.device)
-            y = y.to(args.device)
-
-            y_hat = model(x)
-            loss = torch.nn.functional.cross_entropy(y_hat, y)
-            optimizer.zero_grad()
-
-            loss.backward()
-            optimizer.step()
-
-        scheduler.step()
-
-        #eval_res = eval_dataset(model, test_dataset, args)
-        acc = eval_res["acc"]
-        eval_res = {"fsa_eval_" + k: v for k, v in eval_res.items()}
-
-        if acc > best_acc:
-            epochs_no_improvement = 0
-            best_acc = acc
-            best_model_state_dict = model.state_dict()
-        else:
-            epochs_no_improvement += 1
-
-        if epochs_no_improvement >= args.early_stopping:
-            break
-
-    # load best model
-    model.load_state_dict(best_model_state_dict)
-
-    # reset back to ridge forward
-    model.forward = model.forward_with_ridge
-
-
 def wandb_finish():
     if len(Logger.instance()._backends) > 1 and isinstance(Logger.instance()._backends[1], WandbLogger):
         Logger.instance()._backends[1].close()
@@ -444,16 +358,21 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     for param_name, _ in model.backbone.named_parameters():
         if param_name not in model.backbone_param_names:
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
-    
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
+        if args.log_gpustat:
+            log_gpustat()
         train_dataset.transform = train_transform
         print(f"################## Task {t} ##################")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
         train_dataset.transform = train_transform
         model.train_loop(t=t, train_dataset=train_dataset)
-
+        #if t == 9 and args.sweep_logging:
+        #    Logger.instance().log({"GPU_memory": check_gpu_memory()})
+        if args.log_gpustat:
+            log_gpustat()
+        
 
         # eval on all tasks up to t
         model.eval()
@@ -467,7 +386,12 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
             log_gpustat()
         # log results
         Logger.instance().log(eval_res)
-
+        '''
+        # Early stopping if accuracy is too low
+        if float(eval_res["task_mean/acc"]) <= 0.20:
+            wandb_finish()
+            sys.exit()
+        '''
         
         if args.exit_after_T != 1000:
             if t == args.exit_after_T:
@@ -529,7 +453,120 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     """
 
 
-def main(args):     
+
+
+def calculate_similarity(feature1, feature2, metric='cosine'):
+    """
+    Calculates the similarity between two feature vectors.
+
+    Args:
+        feature1 (np.ndarray): First feature vector.
+        feature2 (np.ndarray): Second feature vector.
+        metric (str): The similarity metric to use ('cosine' or 'euclidean').
+
+    Returns:
+        float: The similarity score.
+    """
+    if metric == 'cosine':
+        return cosine_similarity(feature1.reshape(1, -1), feature2.reshape(1, -1))[0][0]
+    elif metric == 'euclidean':
+        return -np.linalg.norm(feature1 - feature2) # Negative for consistency (higher value = more similar)
+    else:
+        raise ValueError(f"Unsupported similarity metric: {metric}")
+
+def calculate_intra_class_similarity(features, labels, similarity_metric='cosine'):
+    """
+    Calculates the average intra-class similarity for a dataset.
+
+    Args:
+        features (np.ndarray): Array of feature vectors.
+        labels (np.ndarray): Array of corresponding labels.
+        similarity_metric (str): The similarity metric to use ('cosine' or 'euclidean').
+
+    Returns:
+        tuple: (dict, float) - A dictionary of per-class intra-class similarities
+               and the overall average intra-class similarity.
+    """
+    intra_class_similarities = {}
+    unique_labels = np.unique(labels)
+    bar = tqdm(enumerate(unique_labels), desc="Calculating Intra-Class Similarity", total=len(unique_labels))
+    for i, label in bar:
+        class_features = features[labels == label]
+        similarities = []
+        for i in range(len(class_features)):
+            for j in range(i + 1, len(class_features)):
+                similarity = calculate_similarity(class_features[i], class_features[j], similarity_metric)
+                similarities.append(similarity)
+        if similarities:
+            intra_class_similarities[label] = np.mean(similarities)
+        else:
+            intra_class_similarities[label] = 0.0
+
+    overall_intra_class_similarity = np.mean(list(intra_class_similarities.values())) if intra_class_similarities else 0.0
+    return intra_class_similarities, overall_intra_class_similarity
+
+def calculate_inter_class_similarity(features, labels, similarity_metric='cosine'):
+    """
+    Calculates the average inter-class similarity for a dataset.
+
+    Args:
+        features (np.ndarray): Array of feature vectors.
+        labels (np.ndarray): Array of corresponding labels.
+        similarity_metric (str): The similarity metric to use ('cosine' or 'euclidean').
+
+    Returns:
+        float: The overall average inter-class similarity.
+    """
+    inter_class_similarities = []
+    unique_labels = np.unique(labels)
+    bar = tqdm(enumerate(unique_labels), desc="Calculating Inter-Class Similarity", total=len(unique_labels))
+    # Iterate through all pairs of classes
+    for i, _ in bar:
+        for j in range(i + 1, len(unique_labels)):
+            label1 = unique_labels[i]
+            label2 = unique_labels[j]
+            features_class1 = features[labels == label1]
+            features_class2 = features[labels == label2]
+            for feat1 in features_class1:
+                for feat2 in features_class2:
+                    similarity = calculate_similarity(feat1, feat2, similarity_metric)
+                    inter_class_similarities.append(similarity)
+
+    overall_inter_class_similarity = np.mean(inter_class_similarities) if inter_class_similarities else 0.0
+    return overall_inter_class_similarity
+
+def calculate_inter_class_similarity_vectorized(features, labels, similarity_metric='cosine'):
+    """
+    Calculates the average inter-class similarity for a dataset using vectorization.
+    """
+    inter_class_similarities = []
+    unique_labels = np.unique(labels)
+    n_classes = len(unique_labels)
+    bar = tqdm(range(n_classes), desc="Calculating Inter-Class Similarity", total=n_classes)
+
+    for i in bar:
+        for j in range(i + 1, n_classes):
+            label1 = unique_labels[i]
+            label2 = unique_labels[j]
+            features_class1 = features[labels == label1]
+            features_class2 = features[labels == label2]
+
+            if similarity_metric == 'cosine':
+                similarity_matrix = cosine_similarity(features_class1, features_class2)
+                inter_class_similarities.extend(similarity_matrix.flatten())
+            elif similarity_metric == 'euclidean':
+                # Calculate pairwise Euclidean distances and negate for consistency
+                distances = np.linalg.norm(features_class1[:, np.newaxis, :] - features_class2[np.newaxis, :, :], axis=2)
+                inter_class_similarities.extend((-distances).flatten())
+            else:
+                raise ValueError(f"Unsupported similarity metric: {similarity_metric}")
+
+    overall_inter_class_similarity = np.mean(inter_class_similarities) if inter_class_similarities else 0.0
+    return overall_inter_class_similarity
+
+
+
+def main(args):
     # get dataset and augmentations
     train_transform = make_train_transform_from_args(args)
     test_transform = make_test_transform_from_args(args)
@@ -571,7 +608,40 @@ def main(args):
         }
     )
 
-    use_moe(data_manager, train_transform, test_transform, args)
+    #use_moe(data_manager, train_transform, test_transform, args)
+
+
+
+
+    feature_extractor = timm.create_model(args.backbone, pretrained=True).to(args.device)
+    feature_extractor.head = nn.Identity()
+    feature_extractor.eval()
+    train_features = []
+    train_labels = []
+    bar = tqdm(enumerate(data_manager), desc="Extracting Features", total=len(data_manager))
+    for i, (train_dataset, _) in bar:
+        train_dataset.transform = train_transform
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=True)
+        for images, labels in train_loader:  # Iterate through all batches in the loader
+            images = images.to(args.device)
+            features = feature_extractor(images)
+            train_features.append(features.cpu().detach().numpy())
+            train_labels.append(labels.cpu().detach().numpy())
+
+    train_features = np.concatenate(train_features, axis=0)
+    train_labels = np.concatenate(train_labels, axis=0)
+    print("Features shape:", train_features.shape)
+
+
+    # 4. Calculate intra-class similarity on the training set
+    intra_class_similarities, overall_intra_similarity = calculate_intra_class_similarity(train_features, train_labels) # Use train_labels here
+    print(f"Intra-Class Similarities per class: {intra_class_similarities}")
+    print(f"Overall Intra-Class Similarity: {overall_intra_similarity:.4f}")
+    
+    # 5. Calculate inter-class similarity on the training set
+    overall_inter_similarity = calculate_inter_class_similarity_vectorized(train_features, train_labels) # Use train_labels here
+    print(f"Overall Inter-Class Similarity: {overall_inter_similarity:.4f}")
+
 
 
 if __name__ == "__main__":
@@ -632,8 +702,8 @@ if __name__ == "__main__":
     parser.add_argument('--tau', help='In softmax', default=1.0, type=float)
     parser.add_argument('--exit_after_acc', help='finish run after acc=?', default=0.0, type=float)
     parser.add_argument('--trash_var', help='Does nothing', default=0.0, type=float)
-    parser.add_argument('--use_adamw_and_cosinealing', help='Use AdamW optimizer and cosine annealing', default=0, type=int)
-    parser.add_argument('--add_flipped_features', help='Adding flipped features in gmm fitting', default=0, type=int)
+    parser.add_argument('--use_adamw', help='Use AdamW optimizer', default=0, type=int)
+    parser.add_argument('--use_cosine_annealing', help='Use cosine annealing', default=0, type=int)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -670,11 +740,11 @@ if __name__ == "__main__":
         wandb_finish()
         exit(0)
     
-
     if torch.cuda.device_count() > 1:
         print("Specify GPU with: CUDA_VISIBLE_DEVICES=d python main.py --...")
         # print all cuda visible devices ids
         sys.exit()
+
 
     if args.selection_method == "around" and args.selection_criterion != 0:
         print("Selection method 'around' not compatible with selection_criterion")
@@ -702,6 +772,7 @@ if __name__ == "__main__":
     #print("#################")
     #display_profile('cProfile/vtab1.prof')
     #display_profile('cProfile/runtime_optim.prof')
+
 
     main(args)
     try:

@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from src.backbone import get_backbone
 from src.modules import CosineLinear
-from src.layup import LayUP
 from src.moe_seed import MoE_SEED
 from src.data import (
     CILDataManager,

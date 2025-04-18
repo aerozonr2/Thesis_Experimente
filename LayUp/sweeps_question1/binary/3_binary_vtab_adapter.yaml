@@ -1,0 +1,26 @@
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.00020]
+  dataset:
+    values: ["vtab"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  seed :
+    values: [2000, 2001, 2002]
+  selection_method:
+    values: ["around"]
+  add_flipped_features:
+    values: [0, 1]
+  use_adamw_and_cosinealing:
+    values: [0, 1]
+  backbone:
+    values: ["vit_base_patch16_224", "vit_base_patch16_224_in21k"]

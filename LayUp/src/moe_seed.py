@@ -9,8 +9,9 @@ from .backbone.util import call_in_all_submodules
 #from .approach.mvgb import ClassMemoryDataset, ClassDirectoryDataset
 from .approach.gmm import GaussianMixture
 from scipy.stats import wasserstein_distance
+from scipy.special import kl_div as kl_divergence
 
-
+from .modules import CosineLinear
 from .support_functions import check_gpu_memory
 
 import copy
@@ -18,6 +19,7 @@ import random
 import torch
 from tqdm import tqdm
 import time
+
 
 import numpy as np
 
@@ -110,6 +112,8 @@ class MoE_SEED(nn.Module):
         self.logger = None
         self.selection_criterion = args.selection_criterion
         self.task_winning_expert = []
+        self.use_adamw_and_cosinealing = args.use_adamw_and_cosinealing
+        self.flipped_fetures = args.add_flipped_features
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -321,7 +325,7 @@ class MoE_SEED(nn.Module):
             exp_to_finetune = torch.argmax(experts_mean_euclidean_dist)  # Choose expert with the highest Euclidean distance
         return exp_to_finetune
 
-    def selection_kl_divergence(self, train_dataset, inverted=False):
+    def selection_kl_divergence_old(self, train_dataset, inverted=False):
         # KL divergence between the current task distribution and the distributions of the experts
         print("########### Kl_div ########")
 
@@ -338,27 +342,87 @@ class MoE_SEED(nn.Module):
                 for o, old_gmm in enumerate(learned_distributions):
                     old_gauss = MultivariateNormal(old_gmm.mu.data[0][0], covariance_matrix=old_gmm.var.data[0][0])
                     kl_div = torch.distributions.kl_divergence(new_gauss, old_gauss) # KL divergence between the current task distribution and the distributions of the experts (of each class)
+                    
                     kl_matrix[n, o] = kl_div
                     
             experts_mean_kl_div[expert_index] = self.calc_selection_criterion(kl_matrix)            
-            print(f"Expert: {expert_index}")
-            #print("Rounded Kl Matrix:")
-            #print(kl_matrix.to(torch.int))
-            print(f"Mean Kl_div: {torch.mean(kl_matrix)}")
-            print(f"Min Kl_div: {torch.min(kl_matrix)}")
-            print(f"Max Kl_div: {torch.max(kl_matrix)}")
-
-            print("---")
-        print("+++++++++++")
-        print(f"All Experts Kl_div: {experts_mean_kl_div}")
-        print("########################")
         
         if inverted:
             exp_to_finetune = torch.argmin(experts_mean_kl_div)
         else:
             exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
         return exp_to_finetune        
-    
+
+    def selection_kl_divergence(self, train_dataset, inverted=False):
+        # KL divergence between the current task distribution and the distributions of the experts
+        print("########### Kl_div ########")
+
+        experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
+
+        for expert_index in range(self.max_experts):
+            new_distributions = self.create_distributions(train_dataset, expert_index)
+            learned_distributions = [lst for lst in self.experts_distributions[expert_index] if lst] # Filter out empty lists
+
+            kl_matrix = torch.zeros((len(new_distributions), len(learned_distributions)), device=self.device)
+            for n, new_gmm in enumerate(new_distributions):
+                new_mean = new_gmm.mu.data[0][0]
+                new_variance = new_gmm.var.data[0][0]
+                new_stddev = torch.sqrt(new_variance)
+                new_dist = torch.distributions.Independent(torch.distributions.Normal(new_mean, new_stddev), reinterpreted_batch_ndims=1)
+
+                for o, old_gmm in enumerate(learned_distributions):
+                    old_mean = old_gmm.mu.data[0][0]
+                    old_variance = old_gmm.var.data[0][0]
+                    old_stddev = torch.sqrt(old_variance)
+                    old_dist = torch.distributions.Independent(torch.distributions.Normal(old_mean, old_stddev), reinterpreted_batch_ndims=1)
+
+                    kl_div = torch.distributions.kl_divergence(new_dist, old_dist)
+                    kl_matrix[n, o] = kl_div
+
+                    
+            experts_mean_kl_div[expert_index] = self.calc_selection_criterion(kl_matrix)            
+        
+        if inverted:
+            exp_to_finetune = torch.argmin(experts_mean_kl_div)
+        else:
+            exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
+        return exp_to_finetune  
+
+    def selection_kl_divergence_full(self, train_dataset, inverted=False):
+        # KL divergence between the current task distribution and the distributions of the experts
+        print("########### Kl_div ########")
+
+        experts_mean_kl_div = torch.zeros(self.max_experts, device=self.device)
+
+        for expert_index in range(self.max_experts):
+            new_distributions = self.create_distributions(train_dataset, expert_index)
+            learned_distributions = [lst for lst in self.experts_distributions[expert_index] if lst] # Filter out empty lists
+
+            kl_matrix = torch.zeros((len(new_distributions), len(learned_distributions)), device=self.device)
+            for n, new_gmm in enumerate(new_distributions):
+                new_mean = new_gmm.mu.data[0][0]
+                # Versuche, die Dimensionen der Kovarianzmatrix anzupassen
+                new_covariance = new_gmm.var.data[0].squeeze(0).squeeze(0)
+                new_gauss = MultivariateNormal(new_mean, covariance_matrix=new_covariance)
+
+                for o, old_gmm in enumerate(learned_distributions):
+                    old_mean = old_gmm.mu.data[0][0]
+                    # Versuche, die Dimensionen der Kovarianzmatrix anzupassen
+                    old_covariance = old_gmm.var.data[0].squeeze(0).squeeze(0)
+                    old_gauss = MultivariateNormal(old_mean, covariance_matrix=old_covariance)
+
+                    kl_div = torch.distributions.kl_divergence(new_gauss, old_gauss)
+                    kl_matrix[n, o] = kl_div
+
+                    
+            experts_mean_kl_div[expert_index] = self.calc_selection_criterion(kl_matrix)            
+        
+        if inverted:
+            exp_to_finetune = torch.argmin(experts_mean_kl_div)
+        else:
+            exp_to_finetune = torch.argmax(experts_mean_kl_div) # Choose expert with the highest KL divergence
+        return exp_to_finetune  
+
     def selection_ws_divergence(self, train_dataset, inverted=False):
         # Wasserstein divergence between the current task distribution and the distributions of the experts    
         experts_mean_ws_div = torch.zeros(self.max_experts, device=self.device)
@@ -484,9 +548,10 @@ class MoE_SEED(nn.Module):
             # Get expert features
             from_ = 0
 
-            # Not flipped anymore
-            #class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
-            class_features = torch.full((len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
+            if self.flipped_fetures:
+                class_features = torch.full((2 * len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
+            else:
+                class_features = torch.full((len(class_images), model.num_features), fill_value=-999999999.0, device=self.device)  
 
             # Process each image in the class (and its flipped version)
             for images in class_loader:
@@ -494,10 +559,12 @@ class MoE_SEED(nn.Module):
                 images = images.to(self.device, non_blocking=True)
                 features = model(images)
                 class_features[from_: from_+bsz, : model.num_features] = features
-                #features = model(torch.flip(images, dims=(3,)))
-                #class_features[from_+bsz: from_+2*bsz, :] = features
-                #from_ += 2*bsz
-                from_ += bsz
+                if self.flipped_fetures:
+                    features = model(torch.flip(images, dims=(3,)))
+                    class_features[from_+bsz: from_+2*bsz, :] = features
+                    from_ += 2*bsz
+                else:
+                    from_ += bsz
 
             # Calculate distributions
             cov_type = "full" if self.use_multivariate else "diag"
@@ -640,8 +707,18 @@ class MoE_SEED(nn.Module):
 
     def get_optimizer(self, num_param, milestones=[60, 120, 160]):
             """Returns the optimizer"""
-            optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9) # weight_decay=wd?
-            scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
+            optimizer = None
+            scheduler = None
+
+            if self.use_adamw_and_cosinealing:
+                optimizer = torch.optim.AdamW(num_param, lr=self.lr, weight_decay=self.args.weight_decay)
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=self.finetune_epochs)
+                scheduler.last_epoch = -1
+            else:
+                optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9) # weight_decay=wd?                
+                scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
+                
+
             return optimizer, scheduler
     
     def to(self, device=None):
