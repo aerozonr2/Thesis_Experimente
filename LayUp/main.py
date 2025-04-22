@@ -284,10 +284,10 @@ def eval_dataset(model, dataset, args):
             #print(y_hat[0].tolist())
             #print("********")
             class_prob_means = torch.mean(y_hat, dim=0)
-            print(y.tolist())
-            print(pred_classes)
-            print(mean_max_probs)
-            print(f"Class prob. means{class_prob_means.tolist()}")
+            #print(y.tolist())
+            #print(pred_classes)
+            #print(mean_max_probs)
+            #print(f"Class prob. means{class_prob_means.tolist()}")
             # count occurence of means
             
             unique_values, counts = torch.unique(class_prob_means, return_counts=True)
@@ -295,8 +295,8 @@ def eval_dataset(model, dataset, args):
 
             duplicates = {value: count for value, count in counts_dict.items() if count > 1}
             if duplicates:
-                print(f"Duplicates?: {duplicates}")
-
+                #print(f"Duplicates?: {duplicates}")
+                pass
             
         #print(y_hat)
         #print(y_hat.shape)

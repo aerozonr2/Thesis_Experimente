@@ -1,0 +1,22 @@
+program: main.py
+method: random
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.00020]
+  dataset:
+    values: ["vtab"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  seed :
+    distribution: int_uniform
+    min: 0
+    max: 2001
+  use_adamw_and_cosinealing:
+    values: [1]

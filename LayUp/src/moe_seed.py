@@ -705,7 +705,7 @@ class MoE_SEED(nn.Module):
             print("#############################")
             '''
 
-    def get_optimizer(self, num_param, milestones=[60, 120, 160]):
+    def get_optimizer(self, num_param): # milestones=[60, 120, 160]
             """Returns the optimizer"""
             optimizer = None
             scheduler = None
@@ -715,8 +715,8 @@ class MoE_SEED(nn.Module):
                 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=self.finetune_epochs)
                 scheduler.last_epoch = -1
             else:
-                optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9) # weight_decay=wd?                
-                scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
+                optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9, weight_decay=self.args.weight_decay) # weight_decay=wd? War vorher nicht drin               
+                scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[60, 120, 160], gamma=0.1)
                 
 
             return optimizer, scheduler
