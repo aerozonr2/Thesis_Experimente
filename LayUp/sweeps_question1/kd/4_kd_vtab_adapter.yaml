@@ -1,0 +1,26 @@
+program: main.py
+method: bayes
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.00020]
+  dataset:
+    values: ["vtab"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    distribution: uniform
+    min: 0.0
+    max: 1.0
+  seed :
+    distribution: int_uniform
+    min: 0
+    max: 1000
+  selection_method:
+    values: ["around"]
+  backbone:
+    values: ["vit_base_patch16_224"]

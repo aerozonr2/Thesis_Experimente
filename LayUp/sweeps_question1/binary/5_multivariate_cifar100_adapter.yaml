@@ -1,0 +1,26 @@
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.0075]
+  dataset:
+    values: ["cifar100"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [False]
+  seed :
+    values: [2001]
+  selection_method:
+    values: ["around"]
+  add_flipped_features:
+    values: [0, 1]
+  backbone:
+    values: ["vit_base_patch16_224"]
+  use_multivariate:
+    values: [0, 1]
