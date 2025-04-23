@@ -24,3 +24,5 @@ parameters:
     values: ["around"]
   backbone:
     values: ["vit_base_patch16_224"]
+  accumulation_steps:
+    values: [2]

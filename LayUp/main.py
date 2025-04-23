@@ -662,7 +662,8 @@ if __name__ == "__main__":
     #print(f"Args optimized: {args}")
     
     setup_logger(args)
-    
+       
+
     if args.sweep_logging:
         Logger.instance().add_backend(
                 WandbLogger(args.wandb_project, args.wandb_entity, args)
@@ -695,8 +696,6 @@ if __name__ == "__main__":
         except:
             pass
         exit(0)
-    if args.finetune_method == "ssf":
-        args.batch_size = 28
 
 
     #display_profile('cProfile/vtab3.prof')
@@ -706,6 +705,28 @@ if __name__ == "__main__":
     #print("#################")
     #display_profile('cProfile/vtab1.prof')
     #display_profile('cProfile/runtime_optim.prof')
+    
+
+    # half compute batch size of sweep by id
+    halfed_sweep_ids = [
+        "mrkfsh8f"
+    ]
+
+
+
+
+
+
+    try:
+        id = wandb.run.sweep_id
+        if id in halfed_sweep_ids:
+            args.accumulation_steps = 2
+            args = update_args(args)
+        else:
+            print(f"Batch size not reduced")
+    except:
+        print("No sweep id found, using default batch size")
+
 
     main(args)
     try:
