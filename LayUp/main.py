@@ -68,6 +68,9 @@ def update_args(args):
     args.aug_normalize = bool(args.aug_normalize)
 
     args.target_size = 224
+    if args.accumulation_steps > 1:
+        args.batch_size = int(args.batch_size / args.accumulation_steps)
+        print(f"Computing batch size reduced to: {args.batch_size}")
 
     return args
 
@@ -634,6 +637,7 @@ if __name__ == "__main__":
     parser.add_argument('--trash_var', help='Does nothing', default=0.0, type=float)
     parser.add_argument('--use_adamw_and_cosinealing', help='Use AdamW optimizer and cosine annealing', default=0, type=int)
     parser.add_argument('--add_flipped_features', help='Adding flipped features in gmm fitting', default=0, type=int)
+    parser.add_argument('--accumulation_steps', help='computing_bs = batch_size / accumulation_steps', default=1, type=int, choices=[1, 2])
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)

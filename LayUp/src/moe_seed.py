@@ -114,6 +114,7 @@ class MoE_SEED(nn.Module):
         self.task_winning_expert = []
         self.use_adamw_and_cosinealing = args.use_adamw_and_cosinealing
         self.flipped_fetures = args.add_flipped_features
+        self.accumulation_steps = args.accumulation_steps
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -208,19 +209,28 @@ class MoE_SEED(nn.Module):
         model.to(self.device, non_blocking=True)
         # Train model on task:
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
+        optimizer.zero_grad()
 
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             running_loss = 0.0
             #num_train_loader = len(train_loader)
             #pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
-            for inputs, labels in train_loader:
+            for i, (inputs, labels) in enumerate(train_loader):
                 inputs, labels = inputs.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
-                optimizer.zero_grad()
                 outputs = model(inputs)
                 loss = self.criterion(outputs, labels)
                 loss.backward()
-                optimizer.step()
+
+
+                if self.accumulation_steps > 1:
+                    if (i + 1) % self.accumulation_steps == 0:
+                        optimizer.step()
+                        optimizer.zero_grad()
+                else:
+                    optimizer.step()
+                    optimizer.zero_grad()
+
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")

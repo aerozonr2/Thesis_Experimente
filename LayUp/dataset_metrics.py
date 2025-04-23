@@ -17,6 +17,10 @@ from sklearn.model_selection import train_test_split
 import timm
 import numpy as np
 from tqdm import tqdm
+from collections import Counter
+import math
+
+
 
 
 import wandb
@@ -565,6 +569,27 @@ def calculate_inter_class_similarity_vectorized(features, labels, similarity_met
     return overall_inter_class_similarity
 
 
+def calculate_entropy(labels):
+    """
+    Calculates the entropy of a list or NumPy array of labels.
+
+    Args:
+        labels (list or np.ndarray): A list or array of labels.
+
+    Returns:
+        float: The entropy of the labels.
+    """
+
+    label_counts = Counter(labels)
+    total_samples = len(labels)
+    entropy = 0.0
+
+    for count in label_counts.values():
+        probability = count / total_samples
+        entropy -= probability * math.log2(probability)
+
+    return entropy
+
 
 def main(args):
     # get dataset and augmentations
@@ -632,6 +657,10 @@ def main(args):
     train_labels = np.concatenate(train_labels, axis=0)
     print("Features shape:", train_features.shape)
 
+    label_entropy = calculate_entropy(train_labels)
+    print(f"Label Entropy: {label_entropy:.4f}")
+    feature_entropy = calculate_entropy(train_features.flatten())
+    print(f"Feature Entropy: {feature_entropy:.4f}")
 
     # 4. Calculate intra-class similarity on the training set
     intra_class_similarities, overall_intra_similarity = calculate_intra_class_similarity(train_features, train_labels) # Use train_labels here
