@@ -662,7 +662,8 @@ if __name__ == "__main__":
     #print(f"Args optimized: {args}")
     
     setup_logger(args)
-       
+    
+
 
     if args.sweep_logging:
         Logger.instance().add_backend(
@@ -713,7 +714,10 @@ if __name__ == "__main__":
     ]
 
 
-
+    accumulation_steps = os.environ.get("ACCUMULATION_STEPS")
+    if accumulation_steps:
+        args.accumulation_steps = int(accumulation_steps)
+        args = update_args(args)
 
 
 
@@ -722,11 +726,8 @@ if __name__ == "__main__":
         if id in halfed_sweep_ids:
             args.accumulation_steps = 2
             args = update_args(args)
-        else:
-            print(f"Batch size not reduced")
     except:
-        print("No sweep id found, using default batch size")
-
+        pass
 
     main(args)
     try:
