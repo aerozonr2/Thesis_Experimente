@@ -235,6 +235,8 @@ class MoE_SEED(nn.Module):
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
 
+        del train_loader
+
         # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
@@ -510,6 +512,9 @@ class MoE_SEED(nn.Module):
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
+        
+        del train_loader
+        
         # Save Expert parameters
         expert_parameters = {}
         for name, param in self.backbone.named_parameters():
