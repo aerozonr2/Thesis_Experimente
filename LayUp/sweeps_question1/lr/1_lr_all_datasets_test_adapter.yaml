@@ -15,3 +15,4 @@ parameters:
   kd:
     values: [False]
   seed :
+    values: [2001]

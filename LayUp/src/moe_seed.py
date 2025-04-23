@@ -485,7 +485,7 @@ class MoE_SEED(nn.Module):
             #num_train_loader = len(train_loader)
             #pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
             # Logger.instance().add_backend(TQDMLogger(pbar)) # Ist is LayUp, weiß nicht ob notwendig
-            for inputs, labels in train_loader:
+            for i, (inputs, labels) in enumerate(train_loader):
                 inputs, labels = inputs.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
                 optimizer.zero_grad()
                 with torch.no_grad():
@@ -498,7 +498,15 @@ class MoE_SEED(nn.Module):
                 else:
                     loss = self.criterion(outputs, labels)
                 loss.backward()
-                optimizer.step()
+
+                if self.accumulation_steps > 1:
+                    if (i + 1) % self.accumulation_steps == 0:
+                        optimizer.step()
+                        optimizer.zero_grad()
+                else:
+                    optimizer.step()
+                    optimizer.zero_grad()
+                
                 running_loss += loss.item()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
