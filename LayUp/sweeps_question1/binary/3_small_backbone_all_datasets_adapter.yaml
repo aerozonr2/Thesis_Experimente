@@ -22,5 +22,5 @@ parameters:
     values: ["vit_base_patch16_224", "vit_base_patch16_224_in21k"]
   moe_max_experts:
     values: [3]
-  exitexit_after_T:
+  exit_after_T:
     values: [5]
