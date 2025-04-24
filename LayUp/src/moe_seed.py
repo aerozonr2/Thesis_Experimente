@@ -233,6 +233,8 @@ class MoE_SEED(nn.Module):
 
                 running_loss += loss.item()
 
+            sceduler.step()
+
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
 
         del train_loader
@@ -728,7 +730,7 @@ class MoE_SEED(nn.Module):
             print("#############################")
             '''
 
-    def get_optimizer(self, num_param): # milestones=[60, 120, 160]
+    def get_optimizer(self, num_param):
             """Returns the optimizer"""
             optimizer = None
             scheduler = None
@@ -739,7 +741,7 @@ class MoE_SEED(nn.Module):
                 scheduler.last_epoch = -1
             else:
                 optimizer = torch.optim.SGD(num_param, lr=self.lr, momentum=0.9, weight_decay=self.args.weight_decay) # weight_decay=wd? War vorher nicht drin               
-                scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[60, 120, 160], gamma=0.1)
+                scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=[60, 120, 160], gamma=0.1) #milestones=[60, 120, 160]
                 
 
             return optimizer, scheduler
