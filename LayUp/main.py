@@ -71,6 +71,18 @@ def update_args(args):
     if args.accumulation_steps > 1:
         args.batch_size = int(args.batch_size / args.accumulation_steps)
         print(f"Computing batch size reduced to: {args.batch_size}")
+    
+    dataset_T_map = {
+        "dil_imagenetr": {"T": 15, "moe_max_experts": 7},
+        "limited_domainnet": {"T": 6, "moe_max_experts": 3},
+        "vtab": {"T": 5, "moe_max_experts": 3},
+        "cddb": {"T": 5, "moe_max_experts": 3},
+    }
+
+    if args.dataset in dataset_T_map.keys():
+        args.T = dataset_T_map[args.dataset]["T"]
+        args.moe_max_experts = dataset_T_map[args.dataset]["moe_max_experts"]
+        print(f"Dataset {args.dataset} has T={args.T} and moe_max_experts={args.moe_max_experts}")
 
     return args
 
@@ -284,11 +296,11 @@ def eval_dataset(model, dataset, args):
         
         pred_classes = torch.argmax(y_hat, dim=1).tolist()
         if pred_classes != y.tolist():
-            #print(y_hat[0].tolist())
-            #print("********")
+            print(y_hat[0].tolist())
+            print("********")
             class_prob_means = torch.mean(y_hat, dim=0)
-            #print(y.tolist())
-            #print(pred_classes)
+            print(y.tolist())
+            print(pred_classes)
             #print(mean_max_probs)
             #print(f"Class prob. means{class_prob_means.tolist()}")
             # count occurence of means
@@ -484,6 +496,18 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
                 sys.exit()
 
 
+    try:
+        sweep_id = wandb.run.sweep_id
+        run_id = wandb.run.id
+
+        weights_dir = os.path.join("local_experts", sweep_id)
+        os.makedirs(weights_dir, exist_ok=True)
+
+        model.save_experts_to_state_dict(f"{weights_dir}/{run_id}.pth")
+        print(f"Saved experts to {weights_dir}/{run_id}.pth")
+    except:
+        print("No saving experts")
+    """
     # Save experts
     if float(eval_res["task_mean/acc"]) >= 0.7:
         model.save_experts_to_state_dict(f"local_experts/gut_{args.dataset}_{args.backbone}.pth")
@@ -494,7 +518,7 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     else:
         pass
         # lohnt sich nicht
-
+    """
         # VPT ist Deep wegen den 12 Layern, Es wird aber nur das erste benutzt. 12 Layer x 10 vpt_prompt_token_num x 768 embed_dim = VTP Tokens
         # ein experte so viel wie fsa benutzt 10 tokens, nicht 5, wie Kyra das meinte
         # Ich mache jetzt vpt_type="shallow", dadurch fällt der overhead weg, weil nur ein layer benutzt wird
