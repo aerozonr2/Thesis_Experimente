@@ -1,0 +1,22 @@
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.0001] ###
+  dataset:
+    values: ["cifar100", "imagenetr", "cub", "imageneta", "vtab", "cars", "omnibenchmark"]
+  finetune_method:
+    values: ["vpt"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [True]
+  seed :
+    values: [2001] ###
+  selection_method:
+    values: ["inv_kl_div"]
+  use_adamw_and_cosinealing:
+    values: [1, 0] ### 

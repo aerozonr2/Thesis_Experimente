@@ -1,3 +1,5 @@
+import sys
+import subprocess
 import argparse
 import random
 import torch
@@ -9,19 +11,11 @@ import os
 import cProfile
 import copy
 import time
-import sys
-import json
-import subprocess
 from torch import nn
 
 
 import wandb
 
-
-'''
-if torch.cuda.device_count() >= 2:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-'''
 
 from torch.utils.data import DataLoader
 
@@ -41,6 +35,9 @@ from src.logging import Logger, WandbLogger, ConsoleLogger, TQDMLogger
 from torch.utils.data import Subset
 
 from src.support_functions import check_gpu_memory, shrink_dataset, display_profile, log_gpustat, optimize_args
+
+def install_timm(version):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", f"timm=={version}"])
 
 
 def set_seed(seed):
