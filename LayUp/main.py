@@ -78,7 +78,7 @@ def update_args(args):
 
     if args.dataset in dataset_T_map.keys():
         args.T = dataset_T_map[args.dataset]["T"]
-        args.moe_max_experts = dataset_T_map[args.dataset]["moe_max_experts"]
+        #args.moe_max_experts = dataset_T_map[args.dataset]["moe_max_experts"] immer 5!
         print(f"Dataset {args.dataset} has T={args.T} and moe_max_experts={args.moe_max_experts}")
 
     return args
@@ -659,6 +659,7 @@ if __name__ == "__main__":
     parser.add_argument('--use_adamw_and_cosinealing', help='Use AdamW optimizer and cosine annealing', default=0, type=int)
     parser.add_argument('--add_flipped_features', help='Adding flipped features in gmm fitting', default=0, type=int)
     parser.add_argument('--accumulation_steps', help='computing_bs = batch_size / accumulation_steps', default=1, type=int, choices=[1, 2])
+    parser.add_argument('--bottleneck_dim', help='Bottleneck dimension for Adapters', default=64, type=int)
 
     # augmentations
     parser.add_argument("--aug_resize_crop_min", type=float, default=0.7)
@@ -719,7 +720,7 @@ if __name__ == "__main__":
             pass
         exit(0)
 
-    if args.moe_max_experts > args.T:
+    if args.moe_max_experts > args.T and args.dataset != "cddb":
         print(f"Skipping run: moe_max_experts={args.moe_max_experts} > T={args.T}")
         try:
             wandb_finish()

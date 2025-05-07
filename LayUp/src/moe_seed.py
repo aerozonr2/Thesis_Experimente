@@ -115,6 +115,7 @@ class MoE_SEED(nn.Module):
         self.use_adamw_and_cosinealing = args.use_adamw_and_cosinealing
         self.flipped_fetures = args.add_flipped_features
         self.accumulation_steps = args.accumulation_steps
+        self.bottleneck_dim = args.bottleneck_dim
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -131,7 +132,7 @@ class MoE_SEED(nn.Module):
         elif self.finetune_method == 'vpt': 
             self.backbone = add_vpt(self.backbone, vpt_type="shallow")
         elif self.finetune_method == 'adapter':
-            self.backbone = add_adapters(self.backbone)
+            self.backbone = add_adapters(self.backbone, adapter_bottleneck=self.bottleneck_dim)
         else: 
             raise ValueError('Invalid finetune method')
 
