@@ -719,6 +719,14 @@ if __name__ == "__main__":
             pass
         exit(0)
 
+    if args.moe_max_experts > args.T:
+        print(f"Skipping run: moe_max_experts={args.moe_max_experts} > T={args.T}")
+        try:
+            wandb_finish()
+        except:
+            pass
+        exit(0)
+
 
     #display_profile('cProfile/vtab3.prof')
     #exit(0)

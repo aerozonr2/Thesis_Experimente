@@ -15,11 +15,19 @@ import subprocess
 from torch import nn
 from sklearn.model_selection import train_test_split
 import timm
+import pandas
+import seaborn
+import matplotlib.pyplot
 import numpy as np
 from tqdm import tqdm
 from collections import Counter
 import math
-
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import numpy as np
+import csv
 
 
 
@@ -590,6 +598,46 @@ def calculate_entropy(labels):
 
     return entropy
 
+def calculate_feature_variance(features):
+    """
+    Calculates the variance of the features.
+
+    Args:
+        features (np.ndarray): Array of feature vectors.
+
+    Returns:
+        float: The variance of the features.
+    """
+    return np.var(features, axis=0).mean()  # Mean variance across all features
+
+def visualize_csv_with_adjusted_size(csv_filepath, output_filepath="heatmap_adjusted.png"):
+    try:
+        df = pd.read_csv(csv_filepath, index_col=0)
+    except FileNotFoundError:
+        print(f"Fehler: Datei '{csv_filepath}' nicht gefunden.")
+        return
+
+    numeric_cols = df.select_dtypes(include=np.number).columns
+
+    if not numeric_cols.empty:
+        df_normalized = df[numeric_cols].apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
+        cmap = LinearSegmentedColormap.from_list("mycmap", ["white", "lightblue", "darkblue"])
+
+        # Erhöhe die Figurengröße, um die Kästchen größer zu machen
+        plt.figure(figsize=(len(numeric_cols) * 2, len(df) * 1))
+
+        sns.heatmap(df_normalized, annot=False, cmap=cmap, cbar=True, yticklabels=True)
+        plt.title("Farbliche Visualisierung der Datenspalten", fontsize=12) # Kleinere Schriftgröße für den Titel
+        plt.xlabel("Numerische Spalten", fontsize=10) # Kleinere Schriftgröße für die X-Achse
+        plt.ylabel("Datensätze", fontsize=10) # Kleinere Schriftgröße für die Y-Achse
+        plt.xticks(rotation=45, ha="right", fontsize=8) # Kleinere Schriftgröße für die X-Achsenbeschriftungen
+        plt.yticks(fontsize=8) # Kleinere Schriftgröße für die Y-Achsenbeschriftungen
+        plt.tight_layout()
+        plt.savefig(output_filepath)
+        print(f"Heatmap mit angepasster Größe und Schrift gespeichert als '{output_filepath}'.")
+        plt.close()
+    else:
+        print("Keine numerischen Spalten zum Visualisieren gefunden.")
 
 def main(args):
     # get dataset and augmentations
@@ -635,8 +683,9 @@ def main(args):
 
     #use_moe(data_manager, train_transform, test_transform, args)
 
-
-
+    
+    values = [None] * 6
+    values[0] = args.dataset
 
     feature_extractor = timm.create_model(args.backbone, pretrained=True).to(args.device)
     feature_extractor.head = nn.Identity()
@@ -653,24 +702,41 @@ def main(args):
             train_features.append(features.cpu().detach().numpy())
             train_labels.append(labels.cpu().detach().numpy())
 
+    del feature_extractor
+
     train_features = np.concatenate(train_features, axis=0)
     train_labels = np.concatenate(train_labels, axis=0)
     print("Features shape:", train_features.shape)
 
     label_entropy = calculate_entropy(train_labels)
     print(f"Label Entropy: {label_entropy:.4f}")
+    values[1] = label_entropy
     feature_entropy = calculate_entropy(train_features.flatten())
     print(f"Feature Entropy: {feature_entropy:.4f}")
+    values[2] = feature_entropy
 
     # 4. Calculate intra-class similarity on the training set
     intra_class_similarities, overall_intra_similarity = calculate_intra_class_similarity(train_features, train_labels) # Use train_labels here
     print(f"Intra-Class Similarities per class: {intra_class_similarities}")
     print(f"Overall Intra-Class Similarity: {overall_intra_similarity:.4f}")
+    values[5] = overall_intra_similarity
     
     # 5. Calculate inter-class similarity on the training set
     overall_inter_similarity = calculate_inter_class_similarity_vectorized(train_features, train_labels) # Use train_labels here
     print(f"Overall Inter-Class Similarity: {overall_inter_similarity:.4f}")
+    values[4] = overall_inter_similarity
 
+    # 6. Calculate feature variance
+    feature_variance = calculate_feature_variance(train_features)
+    print(f"Feature Variance: {feature_variance:.4f}")
+    values[3] = feature_variance
+
+
+    # Saving values
+    save_path = "local_data/dataset_metrics.csv"
+    with open(save_path, 'a', newline='') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(values)
 
 
 if __name__ == "__main__":
@@ -802,6 +868,11 @@ if __name__ == "__main__":
     #display_profile('cProfile/vtab1.prof')
     #display_profile('cProfile/runtime_optim.prof')
 
+    # Beispielhafte Verwendung:
+    dateipfad = 'local_data/dataset_metrics.csv'  # Ersetze dies durch den Pfad zu deiner CSV-Datei
+    ausgabepfad = 'farbliche_visualisierung.png' # Optional: Gib einen spezifischen Dateinamen an
+    visualize_csv_with_adjusted_size(dateipfad, ausgabepfad)
+    exit(0)
 
     main(args)
     try:
