@@ -293,7 +293,7 @@ def eval_dataset(model, dataset, args):
         
         pred_classes = torch.argmax(y_hat, dim=1).tolist()
         if pred_classes != y.tolist():
-            print(y_hat[0].tolist())
+            #print(y_hat[0].tolist())
             print("********")
             class_prob_means = torch.mean(y_hat, dim=0)
             print(y.tolist())
