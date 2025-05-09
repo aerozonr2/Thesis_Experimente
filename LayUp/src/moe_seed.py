@@ -713,9 +713,6 @@ class MoE_SEED(nn.Module):
         #print("### Bayes ###")
         #print(f"Log_probs shape: {log_probs.shape}")
 
-        output = []
-
-        print(f"Log_probs shape: {log_probs.shape}")
         filtered = torch.max(log_probs, dim=1).values  # Shape: [batchsize, num_classes]
 
         

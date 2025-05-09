@@ -254,9 +254,6 @@ def eval_dataset(model, dataset, args):
         x = x.to(args.device)
         y = y.to(args.device)
         y_hat = model(x)
-        #
-        print(f"y_hat: {y_hat.shape}")
-        #
         only_one_class = False
         max_probs, _ = torch.max(y_hat, dim=1)
         sorted_tensor, sorted_index = torch.sort(y_hat, dim=1, descending=True)
