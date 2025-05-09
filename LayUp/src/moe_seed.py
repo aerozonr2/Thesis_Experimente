@@ -547,8 +547,8 @@ class MoE_SEED(nn.Module):
         all_images = []
         all_labels = []
         # Iterate over the DataLoader to collect images and labels
-        tbar = tqdm(train_dataset, desc="Collecting images and labels", total=len(train_dataset))
-        for image, label in tbar:
+        #tbar = tqdm(train_dataset, desc="Collecting images and labels", total=len(train_dataset))
+        for image, label in train_dataset:
             all_images.append(image)
             all_labels.append(label)
 
@@ -568,9 +568,9 @@ class MoE_SEED(nn.Module):
         # Iterate over each class
         unique_labels = all_labels.unique()
 
-        pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
-        #for class_label in unique_labels:
-        for _, class_label in pbar:
+        #pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
+        for class_label in unique_labels:
+        #for _, class_label in pbar:
             # Get all images of the class
             class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
             class_images = all_images[class_indices]
