@@ -116,6 +116,7 @@ class MoE_SEED(nn.Module):
         self.flipped_fetures = args.add_flipped_features
         self.accumulation_steps = args.accumulation_steps
         self.bottleneck_dim = args.bottleneck_dim
+        self.cl_settig = None
 
     @torch.no_grad()
     def save_backbone_param_names(self):
@@ -212,11 +213,14 @@ class MoE_SEED(nn.Module):
         optimizer, sceduler = self.get_optimizer(num_param=model.parameters())
         optimizer.zero_grad()
 
+
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=2, pin_memory=True)
         for epoch in range(self.finetune_epochs):
             running_loss = 0.0
             #num_train_loader = len(train_loader)
             #pbar = tqdm(enumerate(train_loader), desc=f"Epoch: {epoch}", total=num_train_loader)
+
+
             for i, (inputs, labels) in enumerate(train_loader):
                 inputs, labels = inputs.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
                 outputs = model(inputs)
@@ -237,7 +241,7 @@ class MoE_SEED(nn.Module):
             sceduler.step()
 
             print(f"Epoch [{epoch + 1}/{self.finetune_epochs}], Loss: {running_loss / len(train_loader)}")
-
+        
         del train_loader
 
         # Save Expert parameters
@@ -275,7 +279,12 @@ class MoE_SEED(nn.Module):
 
         stacked_features = torch.stack(features, dim=1)
         #print(f"Stacked features shape: {stacked_features.shape}")
-        synthetic_softmaxed_logits = self.predict_class_bayes(features=stacked_features)
+        if self.cl_settig == "CIL":
+            synthetic_softmaxed_logits = self.predict_class_bayes_cil(features=stacked_features)
+        elif self.cl_settig == "DIL":
+            synthetic_softmaxed_logits = self.predict_class_bayes_dil(features=stacked_features)
+        else:
+            raise ValueError("Invalid CL setting. Must be either 'CIL' or 'DIL'.")
         return synthetic_softmaxed_logits
 
     def choose_expert_to_finetune(self, train_dataset, t):
@@ -538,7 +547,8 @@ class MoE_SEED(nn.Module):
         all_images = []
         all_labels = []
         # Iterate over the DataLoader to collect images and labels
-        for image, label in train_dataset:
+        tbar = tqdm(train_dataset, desc="Collecting images and labels", total=len(train_dataset))
+        for image, label in tbar:
             all_images.append(image)
             all_labels.append(label)
 
@@ -558,8 +568,9 @@ class MoE_SEED(nn.Module):
         # Iterate over each class
         unique_labels = all_labels.unique()
 
-        #pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
-        for class_label in unique_labels:
+        pbar = tqdm(enumerate(unique_labels), desc=f"Compute distributions:", total=len(unique_labels))
+        #for class_label in unique_labels:
+        for _, class_label in pbar:
             # Get all images of the class
             class_indices = (all_labels == class_label).nonzero(as_tuple=True)[0]
             class_images = all_images[class_indices]
@@ -606,7 +617,7 @@ class MoE_SEED(nn.Module):
 
                 else:
                     is_ok = True
-            print("GMM fitted")
+            #print("GMM fitted")
             if len(gmm.mu.data.shape) == 2:
                 gmm.mu.data = gmm.mu.data.unsqueeze(1)
 
@@ -616,6 +627,9 @@ class MoE_SEED(nn.Module):
             assert gmm_shape[1] == 1
             assert gmm_shape[2] == model.num_features
 
+            if self.cl_settig == "DIL":
+                gmm.id = class_label.item()
+
             gmms.append(gmm)
         return gmms
 
@@ -624,7 +638,7 @@ class MoE_SEED(nn.Module):
         self.backbone.eval()
 
     #@profile
-    def predict_class_bayes(self, features):
+    def predict_class_bayes_cil(self, features):
         #print("##### Classification (predict_class_bayes) ######")
         fill_value = -1e8
         log_probs = torch.full((features.shape[0], len(self.experts_distributions), len(self.experts_distributions[0])), fill_value=fill_value, device=features.device)
@@ -640,23 +654,28 @@ class MoE_SEED(nn.Module):
                     #print(f"Probs Shape: {probs.shape}")
                     log_probs[:, expert_index, c] = probs
         #print("### Bayes ###")
+        #print(f"Log_probs shape: {log_probs.shape}")
+
         output = []
-        # Loop through the first dimension (along the 2D slices)
+
+        # Loop through each image in the batch
         for i in range(log_probs.shape[0]):
             # For each row in the slice (2D array), remove the fill_value (-1e8)
             row_result = []
             for j in range(log_probs.shape[2]):  # Loop through columns (2nd dimension)
                 # Get the column values for the current column across all rows in the slice
                 valid_values = log_probs[i, :, j][log_probs[i, :, j] != fill_value]
-                
+
                 # If there are valid values, get the first (they should only be one value per column)
                 if len(valid_values) > 0:
                     row_result.append(valid_values[0])  # Keep only the first valid value for the column
-            
             output.append(row_result)  # Add the processed row to the output
+        filtered = torch.tensor(output)
+
 
         # Convert to a tensor
-        filtered = torch.tensor(output)
+        #filtered = torch.tensor(output)
+        #print(f"Filtered shape: {filtered.shape}")
         #
         #log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
         #padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
@@ -670,6 +689,75 @@ class MoE_SEED(nn.Module):
         self.task_winning_expert.append(winning_expert)
 
         return filtered
+
+    def predict_class_bayes_dil(self, features):
+        #print("##### Classification (predict_class_bayes) ######")
+        fill_value = -1e8
+           
+        log_probs = torch.full((features.shape[0], len(self.experts_distributions), self.num_classes), fill_value=fill_value, device=features.device)
+        # shape: (batch_size, num_experts, num_classes/num_distr.) 
+        for expert_index in range(len(self.experts_distributions)):
+            for c, class_gmm in enumerate(self.experts_distributions[expert_index]):
+
+                if class_gmm == []: # from cil 
+                    continue
+                else:
+                    experts_class_features = features[:, expert_index]
+                    probs = class_gmm.score_samples(experts_class_features)
+                    class_id = class_gmm.id
+                    if torch.all(log_probs[:, expert_index, class_id] == fill_value):
+                        log_probs[:, expert_index, class_id] = probs
+                    else:
+                        # ignore domain, use max prob for each class
+                        log_probs[:, expert_index, class_id] = torch.max(log_probs[:, expert_index, class_id], probs)
+        #print("### Bayes ###")
+        #print(f"Log_probs shape: {log_probs.shape}")
+
+        output = []
+        for i in range(log_probs.shape[0]):
+            sample_experts_probabilities = log_probs[i, :, :]  # Shape: [num_experts, num_classes]
+            if sample_experts_probabilities.size(1) == 1:
+                # If the shape is [1, num_classes], we need to squeeze it to [num_classes]
+                sample_experts_probabilities = sample_experts_probabilities.squeeze(0)
+            max_probabilities, _ = torch.max(sample_experts_probabilities, dim=1)
+            output.append(max_probabilities)  # Append the 1D tensor of max probabilities
+        filtered = torch.tensor(output)
+        """
+        output = []
+
+    
+        # Loop through each image in the batch
+        for i in range(log_probs.shape[0]):
+            sample_experts_probabilities = log_probs[i, :, :]  # Shape: [num_experts, num_classes]
+            filtered_probs = torch.full((len(self.experts_distributions), self.num_classes), fill_value=fill_value, device=features.device)
+            for i, row in enumerate(sample_experts_probabilities):
+                real_values = row[row != fill_value]
+                filtered_probs[i] = real_values
+            max_probs = torch.max(filtered_probs, dim=0).values
+            output.append(max_probs)  # Append the 1D tensor of max probabilities
+        if log_probs.shape[1] == 1:
+            filtered = torch.stack(output)
+        else:
+            filtered = torch.tensor(output)
+        """
+        # Convert to a tensor
+        #filtered = torch.tensor(output)
+        #print(f"Filtered shape: {filtered.shape}")
+        #
+        #log_probs_softmaxed = torch.softmax(filtered/self.tau, dim=1).int() # tau? x= filtered/self.tau
+        #padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
+        #synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
+        
+        """
+        # which expert classifies:
+        max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]
+        winning_expert = max_probs_per_expert.argmax(dim=1)  # Shape: [batchsize]
+        winning_expert = winning_expert.to(torch.int64)
+        self.task_winning_expert.append(winning_expert)
+        """
+        return filtered
+
+
 
     def criterion(self, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""

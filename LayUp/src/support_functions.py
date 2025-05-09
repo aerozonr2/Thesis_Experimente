@@ -81,7 +81,7 @@ def optimize_args(args):
     return args
 
 
-def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):
+def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], DIL=False):
     """
     Shrinks the dataset to a fraction of its original size.
     
@@ -105,7 +105,7 @@ def shrink_dataset(dataset, fraction=0.25, num_images_per_class=50, classes=[0, 
                 break
         print("-------")
         return filtered_dataset
-    
+     
 
     # Calculate the number of samples to keep
     num_samples = int(len(dataset) * fraction)

@@ -53,6 +53,9 @@ class GaussianMixture(torch.nn.Module):
         self.covariance_type = covariance_type
         self.init_params = init_params
 
+        # added for better data management
+        self.id = id
+
         assert self.covariance_type in ["full", "diag"]
         assert self.init_params in ["kmeans", "random"]
 

@@ -452,14 +452,30 @@ def use_moe(data_manager, train_transform, test_transform, args): # test_transfo
     model.num_classes = data_manager.num_classes
     model.logger = Logger.instance()
     model.add_expert()
+    model.cl_settig = "DIL" if DILDataManager.is_dil(str(data_manager.train_dataset)) else "CIL"
+
 
     for param_name, _ in model.backbone.named_parameters():
         if param_name not in model.backbone_param_names:
             model.empty_expert[param_name] = copy.deepcopy(model.backbone.state_dict()[param_name])
+    '''
+    ###
+    for t, (train_dataset, test_datatset) in enumerate(data_manager):
+        labels = [i[1] for i in train_dataset]
+        print(len(train_dataset))
+        #print(labels)
+        #print(len(labels))
+        unique_labels = torch.unique(torch.tensor(labels))
+        print(unique_labels)
+
+        if t == 1:
+            exit(0)
+
     
+    ###
+    '''
     # Trainloop for all tasks
     for t, (train_dataset, test_datatset) in enumerate(data_manager): 
-        train_dataset.transform = train_transform
         print(f"################## Task {t} ##################")
         print(f"Train dataset: {len(train_dataset)}")
         print(f"Test dataset: {len(test_datatset)}")
@@ -561,6 +577,7 @@ def main(args):
         args.dataset, path=args.data_root
     )
     update_transforms(test_base_dataset, transform=test_transform)
+
 
 
     # get datamanager based on ds
