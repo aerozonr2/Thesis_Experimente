@@ -714,32 +714,11 @@ class MoE_SEED(nn.Module):
         #print(f"Log_probs shape: {log_probs.shape}")
 
         output = []
-        for i in range(log_probs.shape[0]):
-            sample_experts_probabilities = log_probs[i, :, :]  # Shape: [num_experts, num_classes]
-            if sample_experts_probabilities.size(1) == 1:
-                # If the shape is [1, num_classes], we need to squeeze it to [num_classes]
-                sample_experts_probabilities = sample_experts_probabilities.squeeze(0)
-            max_probabilities, _ = torch.max(sample_experts_probabilities, dim=1)
-            output.append(max_probabilities)  # Append the 1D tensor of max probabilities
-        filtered = torch.tensor(output)
-        """
-        output = []
 
-    
-        # Loop through each image in the batch
-        for i in range(log_probs.shape[0]):
-            sample_experts_probabilities = log_probs[i, :, :]  # Shape: [num_experts, num_classes]
-            filtered_probs = torch.full((len(self.experts_distributions), self.num_classes), fill_value=fill_value, device=features.device)
-            for i, row in enumerate(sample_experts_probabilities):
-                real_values = row[row != fill_value]
-                filtered_probs[i] = real_values
-            max_probs = torch.max(filtered_probs, dim=0).values
-            output.append(max_probs)  # Append the 1D tensor of max probabilities
-        if log_probs.shape[1] == 1:
-            filtered = torch.stack(output)
-        else:
-            filtered = torch.tensor(output)
-        """
+        print(f"Log_probs shape: {log_probs.shape}")
+        filtered = torch.max(log_probs, dim=1).values  # Shape: [batchsize, num_classes]
+
+        
         # Convert to a tensor
         #filtered = torch.tensor(output)
         #print(f"Filtered shape: {filtered.shape}")
@@ -748,13 +727,13 @@ class MoE_SEED(nn.Module):
         #padding = (0, self.num_classes - log_probs_softmaxed.shape[1])
         #synthetic_softmaxed_logits = torch.nn.functional.pad(log_probs_softmaxed, padding, "constant", 0).int()
         
-        """
+        
         # which expert classifies:
         max_probs_per_expert, _ = log_probs.max(dim=2)  # Shape: [batchsize, experts]
         winning_expert = max_probs_per_expert.argmax(dim=1)  # Shape: [batchsize]
         winning_expert = winning_expert.to(torch.int64)
         self.task_winning_expert.append(winning_expert)
-        """
+        
         return filtered
 
 

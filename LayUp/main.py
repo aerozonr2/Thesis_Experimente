@@ -70,7 +70,7 @@ def update_args(args):
         print(f"Computing batch size reduced to: {args.batch_size}")
     
     dataset_T_map = {
-        "dil_imagenetr": {"T": 15, "moe_max_experts": 7},
+        "dil_imagenetr": {"T": 15, "moe_max_experts": 2},
         "limited_domainnet": {"T": 6, "moe_max_experts": 3},
         "vtab": {"T": 5, "moe_max_experts": 3},
         "cddb": {"T": 5, "moe_max_experts": 3},
@@ -78,7 +78,7 @@ def update_args(args):
 
     if args.dataset in dataset_T_map.keys():
         args.T = dataset_T_map[args.dataset]["T"]
-        #args.moe_max_experts = dataset_T_map[args.dataset]["moe_max_experts"] immer 5!
+        #args.moe_max_experts = dataset_T_map[args.dataset]["moe_max_experts"] #immer 5!
         print(f"Dataset {args.dataset} has T={args.T} and moe_max_experts={args.moe_max_experts}")
 
     return args
@@ -254,6 +254,8 @@ def eval_dataset(model, dataset, args):
         x = x.to(args.device)
         y = y.to(args.device)
         y_hat = model(x)
+        #
+        print(f"y_hat: {y_hat.shape}")
         #
         only_one_class = False
         max_probs, _ = torch.max(y_hat, dim=1)
