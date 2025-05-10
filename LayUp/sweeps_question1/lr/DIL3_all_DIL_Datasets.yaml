@@ -1,0 +1,24 @@
+name: DIL3_all_DIL_Datasets
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.01, 0.001, 0.0001]
+  dataset:
+    values: ["dil_imagenetr", "limited_domainnet", "cddb"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [True]
+  seed:
+    values: [2001]
+  use_adamw_and_cosinealing:
+    values: [0, 1]
+  selection_method:
+    values: ["inv_ws_div", "around"]
+  

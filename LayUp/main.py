@@ -662,7 +662,7 @@ if __name__ == "__main__":
     parser.add_argument("--reduce_dataset", default=1.0, help="Reduce dataset size for faster testing", type=float)
     parser.add_argument('--gmms', help='Number of gaussian models in the mixture', type=int, default=1)
     parser.add_argument('--use_multivariate', help='Use multivariate distribution',type=int, default=0)
-    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="around", choices=["random", "around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"])
+    parser.add_argument('--selection_method', help='Method for expert selection for finetuning on new task', default="around", choices=["random", "around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div", "first"])
     parser.add_argument('--kd', help='Use knowledge distillation', default=False, type=bool)
     parser.add_argument('--kd_alpha', help='Alpha for knowledge distillation', default=0.99, type=float)
     parser.add_argument('--log_gpustat', help='Logging console -> gpustat', action='store_false', default=False)

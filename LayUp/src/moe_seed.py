@@ -304,6 +304,8 @@ class MoE_SEED(nn.Module):
             return self.selection_ws_divergence(train_dataset)
         elif self.selection_method == 'inv_ws_div':
             return self.selection_ws_divergence(train_dataset, inverted=True)
+        elif self.selection_method == 'first':
+            return 0
         else:
             raise ValueError('Invalid selection method')
         # muss man bei beiden Divergenzen .argmin() oder .argmax() am Ende nehmen? In SEED wird bei KL Divergenz .argmax() genommen, aber was ist mit Wasserstein?

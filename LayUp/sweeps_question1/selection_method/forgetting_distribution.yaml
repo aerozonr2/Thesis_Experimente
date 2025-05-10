@@ -1,0 +1,21 @@
+name: forgetting_distribution
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.001] ###
+  dataset:
+    values: ["cifar100", "cub", "imageneta", "vtab", "omnibenchmark"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [True]
+  seed :
+    values: [2001] ###
+  selection_method:
+    values: ["around", "first"]
