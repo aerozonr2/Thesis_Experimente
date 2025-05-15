@@ -34,6 +34,53 @@ from torch.distributions import MultivariateNormal
 #from .incremental_learning import Inc_Learning_Appr
 
 #torch.backends.cuda.matmul.allow_tf32 = False
+def save_frozen_weights(model, filename):
+    frozen_weights = {}
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            frozen_weights[name] = param.data.clone().cpu()
+    torch.save(frozen_weights, filename)
+    print(f"Frozen weights saved to: {filename}")
+
+
+def compare_weights1(initial_file, final_file):
+    initial_weights = torch.load(initial_file)
+    final_weights = torch.load(final_file)
+
+    changed_weights = {}
+    for name, initial_param in initial_weights.items():
+        if name in final_weights:
+            final_param = final_weights[name]
+            if not torch.equal(initial_param, final_param):
+                changed_weights[name] = (initial_param, final_param)
+        else:
+            print(f"Warning: Key '{name}' not found in final weights.")
+
+    if changed_weights:
+        print("\nWeights changed in the following frozen layers:")
+        for name in changed_weights:
+            print(f"- {name}")
+    else:
+        print("\nNo weights changed in the frozen layers.")
+
+def compare_weights2(initial_weights, final_weights):
+
+    same_weights = {}
+    for name, initial_param in initial_weights.items():
+        if name in final_weights:
+            final_param = final_weights[name]
+            if torch.equal(initial_param, final_param):
+                same_weights[name] = (initial_param, final_param)
+        else:
+            print(f"Warning: Key '{name}' not found in final weights.")
+
+    if same_weights:
+        print("\nWeights same in the following layers:")
+        for name in same_weights:
+            print(f"- {name}")
+    else:
+        print("\nNo weights the same in the layers.")
+
 
 def check_backbone_frozen(model: torch.nn.Module, i=None) -> None:
     """
@@ -401,7 +448,6 @@ class MoE_SEED(nn.Module):
                     old_variance = old_gmm.var.data[0][0]
                     old_stddev = torch.sqrt(old_variance)
                     old_dist = torch.distributions.Independent(torch.distributions.Normal(old_mean, old_stddev), reinterpreted_batch_ndims=1)
-
                     kl_div = torch.distributions.kl_divergence(new_dist, old_dist)
                     kl_matrix[n, o] = kl_div
 

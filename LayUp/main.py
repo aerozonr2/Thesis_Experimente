@@ -639,7 +639,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--finetune_method",
         type=str,
-        default="vpt",
+        default="adapter",
         choices=["none", "adapter", "ssf", "vpt"],
     )
     parser.add_argument("--finetune_epochs", type=int, default=10)

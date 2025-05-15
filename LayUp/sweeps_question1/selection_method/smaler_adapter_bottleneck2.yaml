@@ -1,4 +1,4 @@
-name: smaler_adapter_bottleneck
+name: smaler_adapter_bottleneck2
 program: main.py
 method: grid
 metric:
@@ -20,5 +20,5 @@ parameters:
   selection_method:
     values: ["around", "inv_ws_div"]
   bottleneck_dim:
-    values: [8, 16, 32, 64]
+    values: [1, 2, 4]
 

@@ -1,4 +1,4 @@
-name: smaler_adapter_bottleneck
+name: smaler_adapter_bottleneck4_DIL
 program: main.py
 method: grid
 metric:
@@ -6,9 +6,9 @@ metric:
   goal: maximize
 parameters:
   lr:
-    values: [0.001] 
+    values: [0.01] 
   dataset:
-    values: ["imageneta", "vtab"]
+    values: ["dil_imagenetr"]
   finetune_method:
     values: ["adapter"]
   sweep_logging:
@@ -20,5 +20,6 @@ parameters:
   selection_method:
     values: ["around", "inv_ws_div"]
   bottleneck_dim:
-    values: [8, 16, 32, 64]
-
+    values: [1, 2, 4, 8, 16, 32, 64]
+  use_adamw_and_cosinealing:
+    values: [1] 

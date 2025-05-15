@@ -1,0 +1,22 @@
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.01] ###
+  dataset:
+    values: ["dil_imagenetr", "limited_domainnet", "cddb"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [True]
+  seed :
+    values: [2001] ###
+  selection_method:
+    values: ["around", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"]
+  use_adamw_and_cosinealing:
+    values: [1] 
