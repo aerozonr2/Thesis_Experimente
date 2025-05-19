@@ -1,0 +1,26 @@
+name: smaler_adapter_bottleneck5_selection_method
+program: main.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  lr:
+    values: [0.001] 
+  dataset:
+    values: ["imageneta"]
+  finetune_method:
+    values: ["adapter"]
+  sweep_logging:
+    values: [True]
+  kd:
+    values: [True]
+  seed :
+    values: [2001] 
+  selection_method:
+    values: ["around", "first", "eucld_dist", "inv_eucld_dist", "kl_div", "inv_kl_div", "ws_div", "inv_ws_div"]
+  selection_criterion:
+    values: [0, 1, 2]
+  bottleneck_dim:
+    values: [1, 2, 4]
+

@@ -249,6 +249,12 @@ def eval_dataset(model, dataset, args):
 
     predictions = []
     labels = []
+    
+    #Logging
+    prob_diff_first_to_second_class = []
+    highest_prob = []
+    prob_diff_first_to_last_class = []
+    lowest_prob = []
 
     for x, y in dataloader:
         x = x.to(args.device)
@@ -269,23 +275,19 @@ def eval_dataset(model, dataset, args):
         for label in unique_labels:
             label_indices = (y == label).nonzero(as_tuple=True)[0]
             label_indices = label_indices.to(y_hat.device)  # Move indices to the same device as logits
-            #print(f"Label indices: {label_indices}")
 
             probs_for_label = max_probs[label_indices]
-            #print(f"Probs for label {label.item()}: {probs_for_label}")
             if not only_one_class:
                 second_largest_for_label = second_largest[label_indices]
                 sorted_index_for_label = sorted_index[label_indices]
 
             # Move back to CPU for the final mean calculation as dictionaries are CPU-based
             mean_prob = probs_for_label.cpu().mean().item() if probs_for_label.numel() > 0 else 0.0
-            #print(f"Mean prob for label {label.item()}: {mean_prob}")
             if not only_one_class:
                 mean_second_largest = second_largest_for_label.cpu().mean().item() if second_largest_for_label.numel() > 0 else 0.0
 
             mean_max_probs[label.item()] = mean_prob
 
-            #print(f"Mean max prob for label {label.item()}: {mean_max_probs[label.item()]}")
             if not only_one_class:
                 mean_max_probs["second highest prob."] = mean_second_largest
                 mean_max_probs["second highest class"] = sorted_index_for_label.cpu().tolist()
@@ -309,6 +311,20 @@ def eval_dataset(model, dataset, args):
                 #print(f"Duplicates?: {duplicates}")
                 pass
             
+        # Logging of probabilities
+        top_two = torch.topk(y_hat, 2, dim=1, sorted=True)
+        highest_values = top_two.values[:, 0]
+        second_highest_values = top_two.values[:, 1]
+        difference = torch.mean(highest_values - second_highest_values)
+        prob_diff_first_to_second_class.append(difference.item())
+        highest_prob.append(highest_values.mean().item())
+
+        min_values = torch.min(y_hat, dim=1).values
+        difference = torch.mean(highest_values - min_values)
+        prob_diff_first_to_last_class.append(difference.item())
+        lowest_prob.append(min_values.mean().item())
+
+
         #print(y_hat)
         #print(y_hat.shape)
         log_probs_softmaxed = torch.softmax(y_hat, dim=1).int()
@@ -322,7 +338,17 @@ def eval_dataset(model, dataset, args):
 
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
-    
+        
+        
+    Logger.instance().log(
+        {
+            "task_mean/prob_diff_first_to_second_class": np.mean(prob_diff_first_to_second_class),
+            "task_mean/highest_prob": np.mean(highest_prob),
+            "task_mean/prob_diff_first_to_last_class": np.mean(prob_diff_first_to_last_class),
+            "task_mean/lowest_prob": np.mean(lowest_prob)
+         })
+
+
     # Some batches have only one image wich causes a wrong shape
     predictions = [np.expand_dims(pred, axis=0) if pred.ndim == 1 else pred for pred in predictions]
 
