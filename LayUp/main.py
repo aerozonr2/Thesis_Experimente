@@ -295,10 +295,10 @@ def eval_dataset(model, dataset, args):
         pred_classes = torch.argmax(y_hat, dim=1).tolist()
         if pred_classes != y.tolist():
             #print(y_hat[0].tolist())
-            print("********")
+            #print("********")
             class_prob_means = torch.mean(y_hat, dim=0)
-            print(y.tolist())
-            print(pred_classes)
+            #print(y.tolist())
+            #print(pred_classes)
             #print(mean_max_probs)
             #print(f"Class prob. means{class_prob_means.tolist()}")
             # count occurence of means
@@ -310,6 +310,7 @@ def eval_dataset(model, dataset, args):
             if duplicates:
                 #print(f"Duplicates?: {duplicates}")
                 pass
+        
             
         # Logging of probabilities
         top_two = torch.topk(y_hat, 2, dim=1, sorted=True)
