@@ -313,18 +313,20 @@ def eval_dataset(model, dataset, args):
         
             
         # Logging of probabilities
-        top_two = torch.topk(y_hat, 2, dim=1, sorted=True)
-        highest_values = top_two.values[:, 0]
-        second_highest_values = top_two.values[:, 1]
-        difference = torch.mean(highest_values - second_highest_values)
-        prob_diff_first_to_second_class.append(difference.item())
-        highest_prob.append(highest_values.mean().item())
+        if y_hat.shape[1] > 1:
+            top_two = torch.topk(y_hat, 2, dim=1, sorted=True)
+            highest_values = top_two.values[:, 0]
+            second_highest_values = top_two.values[:, 1]
+            difference = torch.mean(highest_values - second_highest_values)
+            prob_diff_first_to_second_class.append(difference.item())
+            highest_prob.append(highest_values.mean().item())
 
-        min_values = torch.min(y_hat, dim=1).values
-        difference = torch.mean(highest_values - min_values)
-        prob_diff_first_to_last_class.append(difference.item())
-        lowest_prob.append(min_values.mean().item())
-
+            min_values = torch.min(y_hat, dim=1).values
+            difference = torch.mean(highest_values - min_values)
+            prob_diff_first_to_last_class.append(difference.item())
+            lowest_prob.append(min_values.mean().item())
+        else:
+            print("Only one class in batch, skipping probability logging")
 
         #print(y_hat)
         #print(y_hat.shape)
@@ -340,14 +342,14 @@ def eval_dataset(model, dataset, args):
         predictions.append(y_hat.cpu().numpy())
         labels.append(y.cpu().numpy())
         
-        
-    Logger.instance().log(
-        {
-            "task_mean/prob_diff_first_to_second_class": np.mean(prob_diff_first_to_second_class),
-            "task_mean/highest_prob": np.mean(highest_prob),
-            "task_mean/prob_diff_first_to_last_class": np.mean(prob_diff_first_to_last_class),
-            "task_mean/lowest_prob": np.mean(lowest_prob)
-         })
+    if len(prob_diff_first_to_second_class) > 0: # more than one class learned so far
+        Logger.instance().log(
+            {
+                "task_mean/prob_diff_first_to_second_class": np.mean(prob_diff_first_to_second_class),
+                "task_mean/highest_prob": np.mean(highest_prob),
+                "task_mean/prob_diff_first_to_last_class": np.mean(prob_diff_first_to_last_class),
+                "task_mean/lowest_prob": np.mean(lowest_prob)
+            })
 
 
     # Some batches have only one image wich causes a wrong shape

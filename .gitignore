@@ -4,6 +4,7 @@
 **/local_data
 **/local_experts
 **/local_logs
+**/local_saved_graphics
 **/__pycache__
 *.pyc
 **/wandb/
