@@ -276,7 +276,6 @@ class DILDataManager:
                     self.test_indices_per_task[task].append(i)
 
         self.num_classes = len(unique_classes)
-
         # sanity check: no overlap
         task_index_sets = [
             set(indices) for indices in self.train_indices_per_task.values()

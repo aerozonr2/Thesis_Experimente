@@ -1,0 +1,13 @@
+name: Dataset_features_new
+program: compute_dataset_features.py
+method: grid
+metric:
+  name: 'task_mean/acc'
+  goal: maximize
+parameters:
+  dataset:
+    values: ["cifar100", "imagenetr", "cub", "imageneta", "cars", "omnibenchmark"]
+  sweep_logging:
+    values: [True]
+  seed :
+    values: [2001]

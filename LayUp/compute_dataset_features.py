@@ -68,7 +68,7 @@ def wandb_finish():
 
 
 
-def save_features_to_csv(features_list, labels_list, dataset_name, output_dir="local_data"):
+def save_features_to_csv(features_list, labels_list, dataset_name, output_dir="local_data/class_features"):
     """
     Save features and labels to a CSV file.
     """
@@ -93,7 +93,7 @@ def save_features_to_csv(features_list, labels_list, dataset_name, output_dir="l
     df = pd.DataFrame(data)
 
     # Speichern als CSV-Datei
-    csv_filename = f"./{output_dir}/{dataset_name}_class_features.csv"
+    csv_filename = f"./{output_dir}/class_features_{dataset_name}.csv"
     df.to_csv(csv_filename, index=False)
     print(f"Daten erfolgreich als '{csv_filename}' gespeichert.")
 
@@ -123,7 +123,7 @@ def main(args):
             test_base_dataset,
             T=args.T,
             num_first_task=None if args.dataset != "cars" else 16,
-            shuffle=True,
+            shuffle=False,
             seed=args.seed,
         )
         # log datamanager info
@@ -160,6 +160,9 @@ def main(args):
             features = feature_extractor(images)
             train_features.append(features.cpu().detach().numpy())
             train_labels.append(labels.cpu().detach().numpy())
+            
+            del images
+            del features
 
     del feature_extractor
 
