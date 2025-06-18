@@ -617,6 +617,24 @@ def visualize_csv_with_adjusted_size(csv_filepath, output_filepath="heatmap_adju
         print(f"Fehler: Datei '{csv_filepath}' nicht gefunden.")
         return
 
+
+    name_mapping = {
+    "cars": "CARS",
+    "cifar100": "CIFAR",
+    "cub": "CUB",
+    "imageneta": "IN-A",
+    "imagenetr": "IN-R",
+    "omnibenchmark": "OB",
+    "dil_imagenetr": "IN-R (D)",
+    "limited_domainnet": "S-DomainNet",
+    "vtab": "VTAB",
+    "cddb": "CDDB"
+    }
+    new_index_values = [name_mapping.get(idx, idx) for idx in df.index]
+    df.index = new_index_values
+
+
+
     numeric_cols = df.select_dtypes(include=np.number).columns
 
     if not numeric_cols.empty:
@@ -627,9 +645,9 @@ def visualize_csv_with_adjusted_size(csv_filepath, output_filepath="heatmap_adju
         plt.figure(figsize=(len(numeric_cols) * 2, len(df) * 1))
 
         sns.heatmap(df_normalized, annot=False, cmap=cmap, cbar=True, yticklabels=True)
-        plt.title("Farbliche Visualisierung der Datenspalten", fontsize=12) # Kleinere Schriftgröße für den Titel
-        plt.xlabel("Numerische Spalten", fontsize=10) # Kleinere Schriftgröße für die X-Achse
-        plt.ylabel("Datensätze", fontsize=10) # Kleinere Schriftgröße für die Y-Achse
+        plt.title("Dataset metrics", fontsize=12) # Kleinere Schriftgröße für den Titel
+        plt.xlabel("Metrics", fontsize=10) # Kleinere Schriftgröße für die X-Achse
+        plt.ylabel("Datasets", fontsize=10) # Kleinere Schriftgröße für die Y-Achse
         plt.xticks(rotation=45, ha="right", fontsize=8) # Kleinere Schriftgröße für die X-Achsenbeschriftungen
         plt.yticks(fontsize=8) # Kleinere Schriftgröße für die Y-Achsenbeschriftungen
         plt.tight_layout()
@@ -638,6 +656,73 @@ def visualize_csv_with_adjusted_size(csv_filepath, output_filepath="heatmap_adju
         plt.close()
     else:
         print("Keine numerischen Spalten zum Visualisieren gefunden.")
+
+def visualize_csv_with_adjusted_size2(csv_filepath, output_filepath="heatmap_adjusted.png"):
+    try:
+        df = pd.read_csv(csv_filepath, index_col=0)
+    except FileNotFoundError:
+        print(f"Fehler: Datei '{csv_filepath}' nicht gefunden.")
+        return
+
+    # Mapping for y-axis (index)
+    name_mapping = {
+        "cars": "CARS",
+        "cifar100": "CIFAR",
+        "cub": "CUB",
+        "imageneta": "IN-A",
+        "imagenetr": "IN-R",
+        "omnibenchmark": "OB",
+        "dil_imagenetr": "IN-R (D)",
+        "limited_domainnet": "S-DomainNet",
+        "vtab": "VTAB",
+        "cddb": "CDDB"
+    }
+    df.index = [name_mapping.get(idx, idx) for idx in df.index]
+
+    # Mapping for x-axis (columns)
+    column_mapping = {
+        "label_entropy": "Label Entropy",
+        "feature_entropy": "Feature Entropy",
+        "feature_variance": "Feature Variance",
+        "interclass_similarity": "Inter-Class Similarity",
+        "intra_class_similarity": "Intra-Class Similarity",
+        }
+    df.columns = df.columns.str.strip()
+    df.rename(columns=column_mapping, inplace=True)
+
+
+    numeric_cols = df.select_dtypes(include=np.number).columns
+
+    if not numeric_cols.empty:
+        df_normalized = df[numeric_cols].apply(lambda x: (x - x.min()) / (x.max() - x.min()), axis=0)
+        cmap = LinearSegmentedColormap.from_list("mycmap", ["white", "lightblue", "darkblue"])
+
+        plt.figure(figsize=(len(numeric_cols) * 2, len(df) * 1))
+        sns.heatmap(df_normalized, annot=False, cmap=cmap, cbar=True,
+                    yticklabels=True, xticklabels=True)
+
+        # Labeling
+        plt.title("Overview: Heatmap of different dataset metrics", fontsize=16)
+        #plt.xlabel("Metrics", fontsize=14)
+        #plt.ylabel("Datasets", fontsize=14)
+
+        # Tick label styling
+        plt.xticks(rotation=45, ha="right", fontsize=11)
+        plt.yticks(fontsize=11)
+
+        # Remove tick marks (but keep labels)
+        plt.tick_params(axis='both', which='both', length=0)
+
+        plt.tight_layout()
+        plt.savefig(output_filepath)
+        print(f"Heatmap gespeichert als '{output_filepath}'.")
+        plt.close()
+    else:
+        print("Keine numerischen Spalten zum Visualisieren gefunden.")
+
+
+
+
 
 def main(args):
     # get dataset and augmentations
@@ -870,8 +955,8 @@ if __name__ == "__main__":
 
     # Beispielhafte Verwendung:
     dateipfad = 'local_data/dataset_metrics.csv'  # Ersetze dies durch den Pfad zu deiner CSV-Datei
-    ausgabepfad = 'farbliche_visualisierung.png' # Optional: Gib einen spezifischen Dateinamen an
-    visualize_csv_with_adjusted_size(dateipfad, ausgabepfad)
+    ausgabepfad = './local_saved_graphics/dataset_metrics2.png' # Optional: Gib einen spezifischen Dateinamen an
+    visualize_csv_with_adjusted_size2(dateipfad, ausgabepfad)
     exit(0)
 
     main(args)
